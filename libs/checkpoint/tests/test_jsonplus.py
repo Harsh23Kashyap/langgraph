@@ -30,6 +30,7 @@ from langgraph.checkpoint.serde.event_hooks import (
     register_serde_event_listener,
 )
 from langgraph.checkpoint.serde.jsonplus import (
+    EXT_CONSTRUCTOR_SINGLE_ARG,
     EXT_METHOD_SINGLE_ARG,
     InvalidModuleError,
     JsonPlusSerializer,
@@ -203,6 +204,34 @@ def test_serde_jsonplus() -> None:
     serde = JsonPlusSerializer(pickle_fallback=False)
 
     assert serde.loads_typed(serde.dumps_typed(surrogates)) == surrogates
+
+
+def test_serde_jsonplus_preserves_deque_maxlen() -> None:
+    serde = JsonPlusSerializer()
+    original = deque([1, 2, 3], maxlen=3)
+
+    restored = serde.loads_typed(serde.dumps_typed(original))
+
+    assert isinstance(restored, deque)
+    assert list(restored) == [1, 2, 3]
+    assert restored.maxlen == 3
+
+    restored.append(4)
+    assert list(restored) == [2, 3, 4]
+
+
+def test_serde_jsonplus_loads_legacy_deque_payload() -> None:
+    serde = JsonPlusSerializer()
+    legacy_payload = ormsgpack.Ext(
+        EXT_CONSTRUCTOR_SINGLE_ARG,
+        _msgpack_enc(("collections", "deque", (1, 2, 3))),
+    )
+
+    restored = serde.loads_typed(("msgpack", _msgpack_enc(legacy_payload)))
+
+    assert isinstance(restored, deque)
+    assert list(restored) == [1, 2, 3]
+    assert restored.maxlen is None
 
 
 def test_serde_jsonplus_json_mode() -> None:
