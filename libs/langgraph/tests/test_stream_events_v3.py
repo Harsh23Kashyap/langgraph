@@ -392,6 +392,34 @@ class TestV2Invoke:
         # value should still be the state (not None or empty)
         assert isinstance(result.value, dict)
 
+    def test_invoke_v2_updates_returns_interrupt_chunks(self) -> None:
+        def my_node(state: SimpleState) -> dict[str, Any]:
+            answer = interrupt("what is your name?")
+            return {"value": answer, "items": ["done"]}
+
+        builder: StateGraph = StateGraph(SimpleState)
+        builder.add_node("my_node", my_node)
+        builder.add_edge(START, "my_node")
+        builder.add_edge("my_node", END)
+        graph = builder.compile(checkpointer=InMemorySaver())
+
+        config: Any = {"configurable": {"thread_id": "test-invoke-v2-updates"}}
+        result = graph.invoke(
+            {"value": "x", "items": []},
+            config,
+            stream_mode="updates",
+            version="v2",
+        )
+
+        assert isinstance(result, list)
+        assert len(result) == 1
+        chunk = result[0]
+        _assert_stream_part_shape(chunk)
+        assert chunk["type"] == "updates"
+        assert chunk["ns"] == ()
+        assert INTERRUPT in chunk["data"]
+        assert all(isinstance(intr, Interrupt) for intr in chunk["data"][INTERRUPT])
+
     def test_invoke_v2_graph_output_interrupt_compat(self) -> None:
         """result['__interrupt__'] works via __getitem__."""
 

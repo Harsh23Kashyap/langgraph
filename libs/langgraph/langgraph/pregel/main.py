@@ -3887,13 +3887,17 @@ class Pregel(
                 - `"exit"`: Changes are persisted only when the graph exits.
             control: Optional run control used to request cooperative drain.
             version: The streaming format version. `"v1"` (default) returns the
-                traditional format, `"v2"` returns `StreamPart` typed dicts when
-                `stream_mode` is not `"values"`.
+                traditional format. With `"v2"`, `stream_mode="values"` returns
+                a `GraphOutput`; any other `stream_mode` returns `StreamPart`
+                typed dicts.
             **kwargs: Additional keyword arguments to pass to the graph run.
 
         Returns:
-            The output of the graph run. If `stream_mode` is `"values"`, it returns the latest output.
-            If `stream_mode` is not `"values"`, it returns a list of output chunks.
+            The output of the graph run. If `stream_mode` is `"values"`,
+            `version="v2"` returns a `GraphOutput` with `.value` and
+            `.interrupts`. If `stream_mode` is not `"values"`, `version="v2"`
+            returns a list of `StreamPart` chunks, and interrupts are included
+            in the chunk data for the requested stream mode.
         """
         output_keys = output_keys if output_keys is not None else self.output_channels
 
