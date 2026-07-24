@@ -1218,3 +1218,75 @@ def test_foreign_object_in_runtime_slot_is_coerced() -> None:
     assert seen["context"] == graph_level_context
     # store still reaches the node (resolved separately, not via the coercion)
     assert seen["store"] is store
+
+
+def test_execution_info_repr() -> None:
+    info = ExecutionInfo(
+        checkpoint_id="cp-1",
+        checkpoint_ns="ns",
+        task_id="task-1",
+        thread_id="thread-1",
+        run_id="run-1",
+        node_attempt=2,
+    )
+    text = repr(info)
+    assert text.startswith("ExecutionInfo(")
+    assert "task_id='task-1'" in text
+    assert "thread_id='thread-1'" in text
+    assert "run_id='run-1'" in text
+    assert "attempt=2" in text
+
+
+def test_server_info_repr() -> None:
+    info = ServerInfo(assistant_id="asst-1", graph_id="graph-1")
+    text = repr(info)
+    assert text.startswith("ServerInfo(")
+    assert "assistant_id='asst-1'" in text
+    assert "graph_id='graph-1'" in text
+    assert "user=None" in text
+
+
+def test_run_control_repr() -> None:
+    # Default (no drain requested): bare form.
+    assert repr(RunControl()) == "RunControl()"
+
+    # After request_drain: reason surfaced.
+    control = RunControl()
+    control.request_drain("user-cancel")
+    assert repr(control) == "RunControl(drain_reason='user-cancel')"
+
+
+def test_runtime_repr() -> None:
+    @dataclass
+    class Context:
+        user_id: str
+
+    runtime = Runtime(
+        context=Context(user_id="u-1"),
+        execution_info=ExecutionInfo(
+            checkpoint_id="cp-1",
+            checkpoint_ns="ns",
+            task_id="task-1",
+        ),
+    )
+    text = repr(runtime)
+    assert text.startswith("Runtime(")
+    assert "Context(user_id='u-1')" in text
+    assert "execution_info=ExecutionInfo(" in text
+    assert "server_info=None" in text
+    # control is None when no RunControl has been set up.
+    assert "control=None" in text
+
+
+def test_runtime_repr_surfaces_drain_request() -> None:
+    @dataclass
+    class Context:
+        user_id: str
+
+    control = RunControl()
+    control.request_drain("timeout")
+
+    runtime = Runtime(context=Context(user_id="u-1"), control=control)
+    text = repr(runtime)
+    # RunControl repr is nested in, which surfaces the drain reason.
+    assert "control=RunControl(drain_reason='timeout')" in text
