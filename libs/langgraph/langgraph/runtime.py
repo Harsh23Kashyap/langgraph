@@ -56,6 +56,13 @@ class ExecutionInfo:
         """Return a new execution info object with selected fields replaced."""
         return replace(self, **overrides)
 
+    def __repr__(self) -> str:
+        return (
+            f"ExecutionInfo(task_id={self.task_id!r}, "
+            f"thread_id={self.thread_id!r}, run_id={self.run_id!r}, "
+            f"attempt={self.node_attempt})"
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class ServerInfo:
@@ -74,6 +81,12 @@ class ServerInfo:
     which supports both attribute access (e.g. `user.identity`) and dict-like
     access (e.g. `user["identity"]`).
     """
+
+    def __repr__(self) -> str:
+        return (
+            f"ServerInfo(assistant_id={self.assistant_id!r}, "
+            f"graph_id={self.graph_id!r}, user={self.user!r})"
+        )
 
 
 class RunControl:
@@ -102,6 +115,11 @@ class RunControl:
     @property
     def drain_reason(self) -> str | None:
         return self._drain_reason
+
+    def __repr__(self) -> str:
+        if self._drain_reason is None:
+            return "RunControl()"
+        return f"RunControl(drain_reason={self._drain_reason!r})"
 
 
 def _no_op_stream_writer(_: Any) -> None: ...
@@ -280,6 +298,14 @@ class Runtime(Generic[ContextT]):
     @property
     def drain_reason(self) -> str | None:
         return self.control.drain_reason if self.control is not None else None
+
+    def __repr__(self) -> str:
+        return (
+            f"Runtime(context={self.context!r}, "
+            f"execution_info={self.execution_info!r}, "
+            f"server_info={self.server_info!r}, "
+            f"control={self.control!r})"
+        )
 
 
 DEFAULT_RUNTIME = Runtime(
