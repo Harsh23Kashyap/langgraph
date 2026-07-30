@@ -377,3 +377,34 @@ def test_graph_output_getitem_interrupt_deprecation() -> None:
         match=r"Accessing GraphOutput via `result\[key\]` is deprecated",
     ):
         assert output["__interrupt__"] == interrupts
+
+
+def test_add_node_without_action_raises_with_message() -> None:
+    """`StateGraph.add_node('name')` with no action must surface a useful error.
+
+    Before the fix this raised `RuntimeError()` with no message. After the
+    fix it raises a `RuntimeError` that mentions the offending node name and
+    the expected second argument.
+    """
+    builder = StateGraph(PlainState)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        builder.add_node("my_orphaned_node")
+
+    msg = str(exc_info.value)
+    assert "my_orphaned_node" in msg
+    assert "add_node" in msg
+
+
+def test_add_node_with_explicit_none_action_raises_with_message() -> None:
+    """Explicit `add_node('name', None)` must produce the same helpful error.
+
+    The same code path covers both the default-None and explicit-None cases
+    once we reach the `action is None` guard.
+    """
+    builder = StateGraph(PlainState)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        builder.add_node("another_orphaned_node", None)
+
+    assert "another_orphaned_node" in str(exc_info.value)

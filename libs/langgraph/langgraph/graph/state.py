@@ -780,15 +780,11 @@ class StateGraph(Generic[StateT, ContextT, InputT, OutputT]):
                 "Adding a node to a graph that has already been compiled. This will "
                 "not be reflected in the compiled graph."
             )
-        if not isinstance(node, str):
-            action = node
-            node = cast(str, getattr(action, "name", getattr(action, "__name__", None)))
-            if node is None:
-                raise ValueError(
-                    "Node name must be provided if action is not a function"
-                )
         if action is None:
-            raise RuntimeError
+            raise RuntimeError(
+                f"Node `{node}` has no action. Pass a callable as the second "
+                "argument to `add_node`, e.g. `add_node('my_node', my_callable)`."
+            )
         if node in self.nodes:
             raise ValueError(f"Node `{node}` already present.")
         if node == END or node == START:
