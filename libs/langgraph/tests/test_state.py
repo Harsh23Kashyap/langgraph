@@ -18,6 +18,7 @@ from langgraph.graph.state import (
     _is_field_channel,
     _warn_invalid_state_schema,
 )
+from langgraph.pregel._read import ChannelRead
 
 
 class State(BaseModel):
@@ -371,3 +372,22 @@ def test_is_field_channel() -> None:
     # No channel cases
     assert _is_field_channel(int) is None
     assert _is_field_channel(Annotated[int, "just_metadata"]) is None
+
+
+def test_channel_read_error_message_is_well_formed() -> None:
+    """`ChannelRead.do_read` outside a Pregel context must surface a readable error.
+
+    Regression test: the original message was constructed via two adjacent
+    string literals with no separator, so users saw
+    `"Not configured with a read functionMake sure to call..."` — two
+    sentences jammed together with no space.
+    """
+    with pytest.raises(RuntimeError) as exc_info:
+        ChannelRead.do_read({}, select="any_channel")
+
+    msg = str(exc_info.value)
+    # Both halves of the original message must be present and separated.
+    assert "Not configured with a read function" in msg
+    assert "in the context of a Pregel process" in msg
+    # The specific broken substring must NOT appear.
+    assert "read functionMake sure" not in msg
