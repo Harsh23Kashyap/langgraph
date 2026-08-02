@@ -1729,6 +1729,23 @@ class ToolRuntime(_DirectlyInjectedToolArg, Generic[ContextT, StateT]):
     execution_info: ExecutionInfo | None = None
     server_info: ServerInfo | None = None
 
+    def __repr__(self) -> str:
+        # Surface only the high-signal fields: tool_call_id (the one
+        # identifier that disambiguates a tool call), state, context, and
+        # the optional execution/server context. Skip config (noisy
+        # RunnableConfig with framework internals), stream_writer (a
+        # function), tools (the full list of BaseTool — verbose), and
+        # store (the BaseStore repr is unbounded for in-memory stores
+        # with many items). Callers who need the omitted fields can
+        # read them off the instance directly.
+        return (
+            f"ToolRuntime(tool_call_id={self.tool_call_id!r}, "
+            f"state={self.state!r}, "
+            f"context={self.context!r}, "
+            f"execution_info={self.execution_info!r}, "
+            f"server_info={self.server_info!r})"
+        )
+
     def emit_output_delta(self, delta: Any) -> None:
         """Stream a partial output chunk on the `tools` stream channel.
 

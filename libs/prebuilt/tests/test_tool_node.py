@@ -2428,3 +2428,75 @@ def test_tool_node_list_return_mixed_with_regular_tool() -> None:
     tool_call_ids = {m.tool_call_id for m in all_msgs}
     assert list_tool_id in tool_call_ids
     assert regular_tool_id in tool_call_ids
+
+
+def test_tool_runtime_repr_surfaces_high_signal_fields() -> None:
+    """`ToolRuntime.__repr__` should surface the fields that matter for debugging.
+
+    The default dataclass repr dumps all 9 fields, which is dominated by
+    the `tools: list[BaseTool]` and the RunnableConfig dict — neither is
+    useful in a stack trace or log line. The custom repr restricts the
+    surface to tool_call_id, state, context, execution_info, server_info.
+    """
+    from langgraph.runtime import ExecutionInfo
+
+    class State(TypedDict, total=False):
+        messages: list
+
+    class Context(TypedDict, total=False):
+        user_id: str
+
+    rt = ToolRuntime(
+        state=State(messages=[]),
+        context=Context(user_id="u-1"),
+        config={"configurable": {"thread_id": "t-1"}},
+        stream_writer=lambda _: None,
+        tool_call_id="tc-42",
+        store=None,
+        tools=[],
+        execution_info=ExecutionInfo(
+            checkpoint_id="cp-1",
+            checkpoint_ns="ns",
+            task_id="task-1",
+        ),
+        server_info=None,
+    )
+    text = repr(rt)
+    assert text.startswith("ToolRuntime(")
+    # High-signal fields are surfaced.
+    assert "tool_call_id='tc-42'" in text
+    assert "state=" in text
+    assert "context=" in text
+    assert "execution_info=ExecutionInfo(" in text
+    assert "server_info=None" in text
+    # Noisy fields are NOT surfaced (their default dataclass reprs are
+    # too verbose for a stack trace or log line).
+    assert "config=" not in text
+    assert "stream_writer=" not in text
+    assert "store=" not in text
+    assert "tools=" not in text
+
+
+def test_tool_runtime_repr_with_omitted_optional_fields() -> None:
+    """A `ToolRuntime` constructed with only the required fields still reprs cleanly."""
+
+    class State(TypedDict, total=False):
+        messages: list
+
+    class Context(TypedDict, total=False):
+        user_id: str
+
+    rt = ToolRuntime(
+        state=State(),
+        context=Context(),
+        config={},
+        stream_writer=lambda _: None,
+        tool_call_id=None,
+        store=None,
+    )
+    text = repr(rt)
+    assert text.startswith("ToolRuntime(")
+    assert "tool_call_id=None" in text
+    # Defaults for execution_info and server_info surface as None.
+    assert "execution_info=None" in text
+    assert "server_info=None" in text
