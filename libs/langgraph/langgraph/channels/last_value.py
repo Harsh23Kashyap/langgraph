@@ -115,8 +115,22 @@ class LastValueAfterFinish(
     def from_checkpoint(self, checkpoint: tuple[Value | Any, bool] | Any) -> Self:
         empty = self.__class__(self.typ)
         empty.key = self.key
-        if checkpoint is not MISSING:
+        if checkpoint is MISSING:
+            return empty
+        # Handle three shapes, matching the DeltaChannel.from_checkpoint pattern
+        # (MISSING / wrapped tuple / bare value). The previous implementation
+        # only handled the tuple shape; bare values (e.g. from a different
+        # version's on-disk format, a manual copy, or a misuse) crashed with
+        # `cannot unpack non-iterable X` or `too many values to unpack`.
+        if isinstance(checkpoint, tuple) and len(checkpoint) == 2:
             empty.value, empty.finished = checkpoint
+        else:
+            # Bare value: treat as `(value, not finished)`. `finished` defaults
+            # to False because that is the only safe assumption when the
+            # finished state is unknown — the next `finish()` call will flip
+            # it to True on the next superstep.
+            empty.value = checkpoint
+            empty.finished = False
         return empty
 
     def update(self, values: Sequence[Value | Any]) -> bool:
