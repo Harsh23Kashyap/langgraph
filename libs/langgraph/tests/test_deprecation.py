@@ -98,11 +98,77 @@ def test_constants_deprecation() -> None:
 
 
 def test_pregel_types_deprecation() -> None:
+    """Importing names from `langgraph.pregel.types` warns; bare import does not.
+
+    Regression: the old module-level `warn(...)` fired at import time,
+    which broke `-W error` users who merely imported the module (for
+    type hints, for example) without using any of the deprecated names.
+    The fix moves the warning into `__getattr__` so it fires only on
+    actual attribute access. The new message preserves the old
+    `Importing from langgraph.pregel.types is deprecated` prefix as
+    a substring so existing `warnings.filterwarnings(message=...)`
+    calls keep working; the deprecated name is appended on a second
+    sentence.
+    """
+    # Bare import must not warn.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # any warning here is a test failure
+        import langgraph.pregel.types  # noqa: F401
+    # Attribute access (e.g. `from X import Y`) does warn.
     with pytest.warns(
         LangGraphDeprecatedSinceV10,
-        match="Importing from langgraph.pregel.types is deprecated. Please use 'from langgraph.types import ...' instead.",
+        match=(
+            r"Importing from langgraph\.pregel\.types is deprecated\. "
+            r"Please use 'from langgraph\.types import \.\.\.' instead\. "
+            r"Deprecated name: StateSnapshot\."
+        ),
     ):
         from langgraph.pregel.types import StateSnapshot  # noqa: F401
+
+
+def test_pregel_types_deprecation_message_preserves_old_prefix() -> None:
+    """Users who filter on the old message prefix keep working.
+
+    `warnings.filterwarnings(message="Importing from langgraph.pregel.types is deprecated")`
+    is a documented way to silence or route this deprecation. The new
+    message must keep that literal substring so existing user code
+    keeps working unchanged.
+    """
+    with pytest.warns(
+        LangGraphDeprecatedSinceV10,
+        match=r"Importing from langgraph\.pregel\.types is deprecated",
+    ):
+        from langgraph.pregel.types import CachePolicy  # noqa: F401
+
+
+def test_pregel_types_module_attribute_access_warns() -> None:
+    """`module.X` access (not just `from X import Y`) also triggers the warn.
+
+    Both access patterns go through `__getattr__`. The from-import case
+    is the common path; the module-attribute case is exercised by
+    doc generators, debuggers, and lazy imports.
+    """
+    import langgraph.pregel.types
+
+    with pytest.warns(
+        LangGraphDeprecatedSinceV10,
+        match=r"Deprecated name: RetryPolicy",
+    ):
+        langgraph.pregel.types.RetryPolicy  # noqa: B018
+
+
+def test_pregel_types_unknown_name_raises_attribute_error() -> None:
+    """Accessing a name that is not in `__all__` raises AttributeError.
+
+    Without the guard, `__getattr__` would warn and then crash inside
+    `getattr(import_module('langgraph.types'), name)`. The guard makes
+    typos fail loudly with the same exception type as a regular
+    module.
+    """
+    import langgraph.pregel.types
+
+    with pytest.raises(AttributeError, match="nonexistent_attribute"):
+        langgraph.pregel.types.nonexistent_attribute  # noqa: B018
 
 
 def test_config_schema_deprecation() -> None:
