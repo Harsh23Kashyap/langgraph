@@ -74,7 +74,28 @@ class BinaryOperatorAggregate(Generic[Value], BaseChannel[Value, Value, Value]):
             typ = dict
         try:
             self.value = typ()
-        except Exception:
+        except (TypeError, ValueError):
+            # `typ` is not constructible as `typ()` with no args. Two
+            # cases are intentional fallbacks:
+            #   1. `TypeError` — abstract base classes
+            #      (`collections.abc.Sequence()`) and classes that require
+            #      positional arguments (`range()`).
+            #   2. `ValueError` — Pydantic models with required fields
+            #      (`pydantic_core.ValidationError` subclasses `ValueError`
+            #      and is raised by `MyModel()` when a field is missing).
+            #      Falling back to MISSING here is load-bearing: LangGraph
+            #      state graphs frequently wrap a Pydantic `State` class in
+            #      a `BinaryOperatorAggregate` and expect the channel to
+            #      start empty so the first `stream()` call can populate
+            #      it.
+            # Trade-off: a user-defined `typ.__init__` that raises
+            # `TypeError` or `ValueError` for an unrelated reason will
+            # also be swallowed. The channel's contract is "I will start
+            # empty if your type can't be constructed with no args", and
+            # the user is expected to test the type in isolation if
+            # construction is non-trivial. Other exception types —
+            # `RuntimeError`, `OSError`, `KeyError` — are NOT caught, so
+            # real bugs in the user's `__init__` propagate.
             self.value = MISSING
 
     def __eq__(self, value: object) -> bool:

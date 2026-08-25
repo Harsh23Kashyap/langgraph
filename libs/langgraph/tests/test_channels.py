@@ -105,6 +105,70 @@ def test_binop() -> None:
     assert channel.get() == 10
 
 
+def test_binop_falls_back_to_missing_for_unconstructible_type() -> None:
+    """`BinaryOperatorAggregate` falls back to MISSING for unconstructible types.
+
+    Some types cannot be called with no arguments — e.g. an abstract base
+    class like `collections.abc.Sequence`, or a builtin that requires
+    arguments like `range`. The constructor should fall back to MISSING so
+    the channel starts empty and the user gets a normal EmptyChannelError
+    on get().
+    """
+    # `range` is a builtin that requires at least one argument. Constructing
+    # it with no args raises TypeError ("range expected at least 1 argument,
+    # got 0"). Before the fix this would have been caught by the broad
+    # `except Exception`; after the fix it's still caught by the narrower
+    # `except (TypeError, ValueError)`.
+    ch = BinaryOperatorAggregate(range, operator.add)
+
+    assert ch.value is MISSING
+    with pytest.raises(EmptyChannelError):
+        ch.get()
+
+
+def test_binop_propagates_non_construction_exceptions() -> None:
+    """`BinaryOperatorAggregate` propagates `RuntimeError` (and similar).
+
+    Regression: the old `except Exception:` swallowed every exception from
+    `typ()`, so a real bug in the user's `__init__` (e.g. a RuntimeError)
+    would silently turn the channel into a permanently-empty state with
+    no diagnostic. The narrower `except (TypeError, ValueError):` lets
+    `RuntimeError`, `OSError`, `KeyError`, etc. propagate so the user
+    sees the real error.
+    """
+
+    class BadType:
+        def __init__(self) -> None:
+            raise RuntimeError("user code runtime error")
+
+    with pytest.raises(RuntimeError, match="user code runtime error"):
+        BinaryOperatorAggregate(BadType, operator.add)
+
+
+def test_binop_falls_back_to_missing_for_pydantic_model_with_required_fields() -> None:
+    """`BinaryOperatorAggregate` falls back to MISSING for a Pydantic model.
+
+    Pydantic `BaseModel` subclasses raise `pydantic_core.ValidationError`
+    (a `ValueError` subclass) when constructed with no args if a field is
+    required. LangGraph state graphs frequently wrap a Pydantic `State`
+    class in a `BinaryOperatorAggregate` and expect the channel to start
+    empty so the first `stream()` call can populate it. This test
+    protects that contract: narrowing the catch to `TypeError` only would
+    break it.
+    """
+    pydantic = pytest.importorskip("pydantic")
+
+    class State(pydantic.BaseModel):
+        query: str
+        answer: str | None = None
+
+    ch = BinaryOperatorAggregate(State, operator.add)
+
+    assert ch.value is MISSING
+    with pytest.raises(EmptyChannelError):
+        ch.get()
+
+
 def test_untracked_value() -> None:
     channel = UntrackedValue(dict).from_checkpoint(MISSING)
     assert channel.ValueType is dict
