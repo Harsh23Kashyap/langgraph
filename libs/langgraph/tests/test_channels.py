@@ -9,9 +9,15 @@ from langgraph.checkpoint.serde.types import _DeltaSnapshot
 from typing_extensions import NotRequired, TypedDict
 
 from langgraph._internal._typing import MISSING
+from langgraph.channels.any_value import AnyValue
 from langgraph.channels.binop import BinaryOperatorAggregate
 from langgraph.channels.delta import DeltaChannel
+from langgraph.channels.ephemeral_value import EphemeralValue
 from langgraph.channels.last_value import LastValue
+from langgraph.channels.named_barrier_value import (
+    NamedBarrierValue,
+    NamedBarrierValueAfterFinish,
+)
 from langgraph.channels.topic import Topic
 from langgraph.channels.untracked_value import UntrackedValue
 from langgraph.errors import EmptyChannelError, InvalidUpdateError
@@ -127,6 +133,233 @@ def test_untracked_value() -> None:
     new_channel = UntrackedValue(dict).from_checkpoint(checkpoint)
     with pytest.raises(EmptyChannelError):
         new_channel.get()
+
+
+def test_ephemeral_value() -> None:
+    """`EphemeralValue` stores the value from the previous step, clears after.
+
+    `guard=True` (default) raises `InvalidUpdateError` if more than one value
+    is received in a single update. `guard=False` keeps the last value
+    silently. An empty update clears the channel if it had a value.
+    """
+    # guard=True: default behavior, one value per step.
+    channel = EphemeralValue(int).from_checkpoint(MISSING)
+    assert channel.ValueType is int
+    assert channel.UpdateType is int
+
+    with pytest.raises(EmptyChannelError):
+        channel.get()
+    assert not channel.is_available()
+
+    # empty update on an already-empty channel is a no-op (returns False).
+    assert channel.update([]) is False
+
+    channel.update([42])
+    assert channel.is_available()
+    assert channel.get() == 42
+
+    # next step: empty update clears
+    assert channel.update([]) is True
+    assert not channel.is_available()
+    with pytest.raises(EmptyChannelError):
+        channel.get()
+
+    # guard=True rejects multiple values per step.
+    channel.update([1])
+    with pytest.raises(InvalidUpdateError, match="can receive only one value"):
+        channel.update([1, 2])
+
+    # guard=False accepts any number of values; the last one wins.
+    channel2 = EphemeralValue(str, guard=False).from_checkpoint(MISSING)
+    channel2.update(["a", "b", "c"])
+    assert channel2.get() == "c"
+
+    # checkpoint round-trip from a populated value.
+    channel.update([7])
+    checkpoint = channel.checkpoint()
+    restored = EphemeralValue(int).from_checkpoint(checkpoint)
+    assert restored.get() == 7
+
+    # checkpoint round-trip from MISSING leaves the channel empty.
+    empty = EphemeralValue(int).from_checkpoint(MISSING)
+    assert empty.checkpoint() is MISSING
+    with pytest.raises(EmptyChannelError):
+        empty.get()
+
+    # copy() produces an independent channel.
+    channel.update([5])
+    cloned = channel.copy()
+    assert cloned.get() == 5
+    channel.update([6])
+    assert channel.get() == 6
+    assert cloned.get() == 5
+
+
+def test_any_value() -> None:
+    """`AnyValue` stores the last value received and clears on empty update.
+
+    Unlike `EphemeralValue`, `AnyValue` does not have a `guard` parameter:
+    any number of values can be written in a single step, and the last one
+    is kept. An empty update clears the channel if it had a value.
+    """
+    channel = AnyValue(int).from_checkpoint(MISSING)
+    assert channel.ValueType is int
+    assert channel.UpdateType is int
+
+    with pytest.raises(EmptyChannelError):
+        channel.get()
+    assert not channel.is_available()
+
+    channel.update([1, 2, 3])
+    assert channel.is_available()
+    assert channel.get() == 3
+
+    # multiple writes accumulate by overwriting, not raising.
+    channel.update([10])
+    assert channel.get() == 10
+
+    # empty update clears if value is present.
+    assert channel.update([]) is True
+    assert not channel.is_available()
+
+    # empty update on an already-empty channel is a no-op (returns False).
+    assert channel.update([]) is False
+
+    # checkpoint round-trip from a populated value.
+    channel.update([99])
+    checkpoint = channel.checkpoint()
+    restored = AnyValue(int).from_checkpoint(checkpoint)
+    assert restored.get() == 99
+
+    # checkpoint round-trip from MISSING leaves the channel empty.
+    empty = AnyValue(int).from_checkpoint(MISSING)
+    assert empty.checkpoint() is MISSING
+    with pytest.raises(EmptyChannelError):
+        empty.get()
+
+    # copy() produces an independent channel.
+    channel.update([5])
+    cloned = channel.copy()
+    assert cloned.get() == 5
+    channel.update([6])
+    assert channel.get() == 6
+    assert cloned.get() == 5  # clone is unaffected by further updates
+
+
+def test_named_barrier_value() -> None:
+    """`NamedBarrierValue` waits for all named values to be seen.
+
+    The channel is unavailable until `update()` has been called with every
+    name in `names`. `consume()` clears `seen` so the next round can
+    collect the names again. A value not in `names` raises
+    `InvalidUpdateError`.
+    """
+    names = {"a", "b", "c"}
+    channel = NamedBarrierValue(str, names).from_checkpoint(MISSING)
+    assert channel.ValueType is str
+    assert channel.UpdateType is str
+
+    assert not channel.is_available()
+    with pytest.raises(EmptyChannelError):
+        channel.get()
+
+    # partial names: still unavailable.
+    channel.update(["a"])
+    assert not channel.is_available()
+
+    channel.update(["b"])
+    assert not channel.is_available()
+
+    # all names in one call: now available.
+    assert channel.update(["c"]) is True
+    assert channel.is_available()
+    assert channel.get() is None  # NamedBarrierValue.get() returns None on success
+
+    # update() with a value already in seen is a no-op (returns False).
+    assert channel.update(["a"]) is False
+
+    # update() with duplicates within a single call is also a no-op for
+    # the duplicate (only the first add counts).
+    fresh = NamedBarrierValue(str, names)
+    assert fresh.update(["a", "a", "b"]) is True  # two new names, not three
+    assert not fresh.is_available()  # "c" still missing
+
+    # consume clears seen so the next round can re-collect.
+    assert channel.consume() is True
+    assert not channel.is_available()
+    assert channel.consume() is False  # second consume is a no-op
+
+    # values not in names raise InvalidUpdateError.
+    channel2 = NamedBarrierValue(str, {"a", "b"})
+    with pytest.raises(InvalidUpdateError, match="Value x not in"):
+        channel2.update(["a", "x"])
+
+    # checkpoint round-trip in a partial state: restore continues the count.
+    partial = NamedBarrierValue(str, names)
+    partial.update(["a"])
+    checkpoint = partial.checkpoint()
+    restored = NamedBarrierValue(str, names).from_checkpoint(checkpoint)
+    assert not restored.is_available()
+    restored.update(["b", "c"])
+    assert restored.is_available()
+
+    # checkpoint round-trip from MISSING leaves seen empty.
+    fresh2 = NamedBarrierValue(str, names).from_checkpoint(MISSING)
+    assert fresh2.checkpoint() == set()
+
+
+def test_named_barrier_value_after_finish() -> None:
+    """`NamedBarrierValueAfterFinish` waits for all names then a finish().
+
+    The `finish()` gate must be called *after* every name has been seen;
+    `get()` raises `EmptyChannelError` if either condition is unmet. After
+    `consume()` the channel reverts to "waiting for names" state.
+    """
+    names = {"x", "y"}
+    channel = NamedBarrierValueAfterFinish(str, names).from_checkpoint(MISSING)
+    assert channel.ValueType is str
+    assert channel.UpdateType is str
+
+    # finish() called before any names are seen: returns False.
+    assert channel.finish() is False
+
+    # partial names: still unavailable.
+    channel.update(["x"])
+    assert not channel.is_available()
+    assert channel.finish() is False  # still not all names yet
+
+    # all names seen but not finished: still unavailable.
+    channel.update(["y"])
+    assert not channel.is_available()
+    with pytest.raises(EmptyChannelError):
+        channel.get()
+
+    # finish() makes the value available.
+    assert channel.finish() is True
+    assert channel.is_available()
+    assert channel.get() is None
+
+    # second finish() is a no-op (already finished).
+    assert channel.finish() is False
+
+    # consume reverts to "waiting for names".
+    assert channel.consume() is True
+    assert not channel.is_available()
+    assert channel.consume() is False
+
+    # checkpoint round-trip with finished=True preserves availability.
+    channel.update(["x", "y"])
+    channel.finish()
+    checkpoint = channel.checkpoint()
+    restored = NamedBarrierValueAfterFinish(str, names).from_checkpoint(checkpoint)
+    assert restored.is_available()
+
+    # checkpoint round-trip with finished=False restores a "waiting" state.
+    partial = NamedBarrierValueAfterFinish(str, names)
+    partial.update(["x", "y"])
+    checkpoint2 = partial.checkpoint()
+    restored2 = NamedBarrierValueAfterFinish(str, names).from_checkpoint(checkpoint2)
+    assert not restored2.is_available()
 
 
 # ---------------------------------------------------------------------------
