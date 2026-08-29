@@ -12,6 +12,10 @@ from langgraph._internal._typing import MISSING
 from langgraph.channels.binop import BinaryOperatorAggregate
 from langgraph.channels.delta import DeltaChannel
 from langgraph.channels.last_value import LastValue
+from langgraph.channels.named_barrier_value import (
+    NamedBarrierValue,
+    NamedBarrierValueAfterFinish,
+)
 from langgraph.channels.topic import Topic
 from langgraph.channels.untracked_value import UntrackedValue
 from langgraph.errors import EmptyChannelError, InvalidUpdateError
@@ -670,3 +674,76 @@ def test_delta_channel_from_checkpoint_seed_none_is_distinct_from_sentinel() -> 
     ch = spec.from_checkpoint(None)
     ch.replay_writes([("t0", "x", "after")])
     assert ch.get() == "after"
+
+
+# ---------------------------------------------------------------------------
+# NamedBarrierValue update atomicity
+# ---------------------------------------------------------------------------
+
+
+def test_named_barrier_value_update_is_atomic() -> None:
+    """`NamedBarrierValue.update` must not mutate `seen` before raising.
+
+    Regression: the old `update` validated each value in a single pass and
+    added it to `seen` as it went. A batch like `update(["a", "x"])` with
+    `names={"a", "b"}` would add "a" to `seen` first, then raise
+    `InvalidUpdateError` for "x" — leaving the channel in a partially
+    mutated state. The fix validates the entire batch before mutating.
+    """
+    ch = NamedBarrierValue(str, {"a", "b"})
+
+    # Establish a baseline state.
+    ch.update(["a"])
+    assert ch.seen == {"a"}
+
+    # A mixed batch (valid + invalid) must raise and leave `seen` unchanged.
+    with pytest.raises(InvalidUpdateError, match="Value x not in"):
+        ch.update(["b", "x"])
+    assert ch.seen == {"a"}, (
+        f"update() must not mutate seen on a failed batch; "
+        f"expected {{'a'}}, got {ch.seen!r}"
+    )
+
+    # After the failed update, a follow-up update with the previously
+    # valid value must still work (proving the channel wasn't corrupted).
+    ch.update(["b"])
+    assert ch.seen == {"a", "b"}
+
+
+def test_named_barrier_value_after_finish_update_is_atomic() -> None:
+    """`NamedBarrierValueAfterFinish.update` must also be atomic.
+
+    Same regression as `NamedBarrierValue.update`, applied to the
+    AfterFinish variant which shares the same bug.
+    """
+    ch = NamedBarrierValueAfterFinish(str, {"x", "y"})
+
+    ch.update(["x"])
+    assert ch.seen == {"x"}
+
+    with pytest.raises(InvalidUpdateError, match="Value z not in"):
+        ch.update(["y", "z"])
+    assert ch.seen == {"x"}, (
+        f"update() must not mutate seen on a failed batch; "
+        f"expected {{'x'}}, got {ch.seen!r}"
+    )
+
+    ch.update(["y"])
+    assert ch.seen == {"x", "y"}
+
+
+def test_named_barrier_value_update_invalid_none_is_detected() -> None:
+    """`update` must correctly report `None` as an invalid value.
+
+    Regression: a naive `next((... for ...), None)` sentinel would let
+    `None` slip through as "no invalid found" because the return value
+    is indistinguishable from a missing sentinel. The fix uses a
+    private `object()` sentinel so that `None` is a detectable
+    invalid value.
+    """
+    ch = NamedBarrierValue(str, {"a", "b"})
+
+    # The literal `None` is not in names; the validator must still
+    # surface it as the invalid value (not as "no invalid found").
+    with pytest.raises(InvalidUpdateError, match="Value None not in"):
+        ch.update([None])

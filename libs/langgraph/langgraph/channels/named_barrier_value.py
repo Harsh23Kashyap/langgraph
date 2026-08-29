@@ -54,16 +54,23 @@ class NamedBarrierValue(Generic[Value], BaseChannel[Value, Value, set[Value]]):
         return empty
 
     def update(self, values: Sequence[Value]) -> bool:
+        # Validate the entire batch before mutating any state, so a partial
+        # failure (e.g. `update(["a", "x"])` with names={"a", "b"}) leaves
+        # `seen` unchanged. The first invalid value (by order) is reported
+        # so the error message still pinpoints which value was bad. The
+        # `_NOT_FOUND` sentinel is a private object so that `None` is a
+        # valid (or invalid) value distinguishable from "no invalid found".
+        _NOT_FOUND = object()
+        invalid = next((v for v in values if v not in self.names), _NOT_FOUND)
+        if invalid is not _NOT_FOUND:
+            raise InvalidUpdateError(
+                f"At key '{self.key}': Value {invalid} not in {self.names}"
+            )
         updated = False
         for value in values:
-            if value in self.names:
-                if value not in self.seen:
-                    self.seen.add(value)
-                    updated = True
-            else:
-                raise InvalidUpdateError(
-                    f"At key '{self.key}': Value {value} not in {self.names}"
-                )
+            if value not in self.seen:
+                self.seen.add(value)
+                updated = True
         return updated
 
     def get(self) -> Value:
@@ -132,16 +139,23 @@ class NamedBarrierValueAfterFinish(
         return empty
 
     def update(self, values: Sequence[Value]) -> bool:
+        # Validate the entire batch before mutating any state, so a partial
+        # failure (e.g. `update(["a", "x"])` with names={"a", "b"}) leaves
+        # `seen` unchanged. The first invalid value (by order) is reported
+        # so the error message still pinpoints which value was bad. The
+        # `_NOT_FOUND` sentinel is a private object so that `None` is a
+        # valid (or invalid) value distinguishable from "no invalid found".
+        _NOT_FOUND = object()
+        invalid = next((v for v in values if v not in self.names), _NOT_FOUND)
+        if invalid is not _NOT_FOUND:
+            raise InvalidUpdateError(
+                f"At key '{self.key}': Value {invalid} not in {self.names}"
+            )
         updated = False
         for value in values:
-            if value in self.names:
-                if value not in self.seen:
-                    self.seen.add(value)
-                    updated = True
-            else:
-                raise InvalidUpdateError(
-                    f"At key '{self.key}': Value {value} not in {self.names}"
-                )
+            if value not in self.seen:
+                self.seen.add(value)
+                updated = True
         return updated
 
     def get(self) -> Value:
