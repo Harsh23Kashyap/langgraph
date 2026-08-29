@@ -234,6 +234,23 @@ def test_checkpoint_errors() -> None:
         )
 
 
+def test_node_builder_read_from_after_subscribe_only() -> None:
+    """`NodeBuilder.read_from` must raise if `subscribe_only` was called first.
+
+    Regression: the old `assert isinstance(self._channels, list)` was
+    stripped when Python runs with `-O`, so the check silently passed and
+    `read_from` would then call `self._channels.extend(channels)` on a
+    `str` and raise a confusing `AttributeError: 'str' object has no
+    attribute 'extend'`. The fix replaces the assert with an explicit
+    `if isinstance/raise` so the check fires regardless of optimization.
+    """
+    b = NodeBuilder()
+    b.subscribe_only("input")
+
+    with pytest.raises(ValueError, match="Cannot read additional channels"):
+        b.read_from("other")
+
+
 def test_context_json_schema() -> None:
     """Test that config json schema is generated properly."""
     chain = NodeBuilder().subscribe_only("input").write_to("output")
