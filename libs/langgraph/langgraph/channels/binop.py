@@ -109,6 +109,16 @@ class BinaryOperatorAggregate(Generic[Value], BaseChannel[Value, Value, Value]):
     def update(self, values: Sequence[Value]) -> bool:
         if not values:
             return False
+        # Validate the entire batch before mutating any state, so a partial
+        # failure (e.g. two `Overwrite` values in the same `update()`) leaves
+        # `self.value` unchanged. This mirrors the same fix applied to
+        # `NamedBarrierValue.update` in PR #11.
+        if sum(1 for v in values if _get_overwrite(v)[0]) > 1:
+            msg = create_error_message(
+                message="Can receive only one Overwrite value per super-step.",
+                error_code=ErrorCode.INVALID_CONCURRENT_GRAPH_UPDATE,
+            )
+            raise InvalidUpdateError(msg)
         if self.value is MISSING:
             self.value = values[0]
             values = values[1:]
@@ -116,12 +126,8 @@ class BinaryOperatorAggregate(Generic[Value], BaseChannel[Value, Value, Value]):
         for value in values:
             is_overwrite, overwrite_value = _get_overwrite(value)
             if is_overwrite:
-                if seen_overwrite:
-                    msg = create_error_message(
-                        message="Can receive only one Overwrite value per super-step.",
-                        error_code=ErrorCode.INVALID_CONCURRENT_GRAPH_UPDATE,
-                    )
-                    raise InvalidUpdateError(msg)
+                # `seen_overwrite` is guaranteed False here: the validator
+                # above ensures the batch has at most one `Overwrite`.
                 self.value = overwrite_value
                 seen_overwrite = True
                 continue

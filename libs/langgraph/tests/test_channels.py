@@ -105,6 +105,55 @@ def test_binop() -> None:
     assert channel.get() == 10
 
 
+def test_binop_update_is_atomic() -> None:
+    """`BinaryOperatorAggregate.update` must not mutate `self.value` on a failed batch.
+
+    Regression: the old `update` validated each value in a single pass and
+    applied it to `self.value` as it went. A batch like
+    `update([1, Overwrite(10), Overwrite(20)])` would first set
+    `self.value = 10` (from the first Overwrite), then raise
+    `InvalidUpdateError` when it saw the second — leaving the channel in
+    a partially-mutated state. The fix validates the batch up front
+    (count `Overwrite` values; reject if > 1) before any mutation.
+    """
+    ch = BinaryOperatorAggregate(int, operator.add).from_checkpoint(MISSING)
+    assert ch.get() == 0
+
+    # Baseline: 1 + 2 == 3.
+    ch.update([1, 2])
+    assert ch.get() == 3
+
+    # Two Overwrites in the same batch: must raise AND leave value at 3.
+    with pytest.raises(
+        InvalidUpdateError, match="Can receive only one Overwrite value per super-step"
+    ):
+        ch.update([3, Overwrite(10), Overwrite(20)])
+    assert ch.get() == 3, (
+        f"update() must not mutate self.value on a failed batch; "
+        f"expected 3, got {ch.get()}"
+    )
+
+    # A follow-up valid update still works (proving the channel wasn't corrupted).
+    ch.update([4])
+    assert ch.get() == 7
+
+
+def test_binop_update_single_overwrite_still_works() -> None:
+    """A single `Overwrite` in a batch must still apply (regression guard)."""
+    ch = BinaryOperatorAggregate(int, operator.add).from_checkpoint(MISSING)
+    ch.update([1, 2])
+    assert ch.get() == 3
+
+    # Single Overwrite at the end replaces the accumulated value.
+    ch.update([10, Overwrite(99)])
+    assert ch.get() == 99
+
+    # Single Overwrite at the start (after the initial value) is also fine.
+    ch2 = BinaryOperatorAggregate(int, operator.add).from_checkpoint(MISSING)
+    ch2.update([Overwrite(42), 1, 2])
+    assert ch2.get() == 42
+
+
 def test_untracked_value() -> None:
     channel = UntrackedValue(dict).from_checkpoint(MISSING)
     assert channel.ValueType is dict
