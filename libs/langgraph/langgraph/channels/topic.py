@@ -61,7 +61,11 @@ class Topic(
         return empty
 
     def checkpoint(self) -> list[Value]:
-        return self.values
+        # Return a snapshot, not a live reference. Otherwise, mutations to
+        # this channel (via subsequent `update()` calls) would silently
+        # change the saved checkpoint. `copy()` already does this; the
+        # checkpoint path needs the same treatment for consistency.
+        return self.values.copy()
 
     def from_checkpoint(self, checkpoint: list[Value]) -> Self:
         empty = self.__class__(self.typ, self.accumulate)
