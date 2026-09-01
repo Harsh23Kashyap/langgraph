@@ -12,6 +12,10 @@ from langgraph._internal._typing import MISSING
 from langgraph.channels.binop import BinaryOperatorAggregate
 from langgraph.channels.delta import DeltaChannel
 from langgraph.channels.last_value import LastValue
+from langgraph.channels.named_barrier_value import (
+    NamedBarrierValue,
+    NamedBarrierValueAfterFinish,
+)
 from langgraph.channels.topic import Topic
 from langgraph.channels.untracked_value import UntrackedValue
 from langgraph.errors import EmptyChannelError, InvalidUpdateError
@@ -670,3 +674,69 @@ def test_delta_channel_from_checkpoint_seed_none_is_distinct_from_sentinel() -> 
     ch = spec.from_checkpoint(None)
     ch.replay_writes([("t0", "x", "after")])
     assert ch.get() == "after"
+
+
+# ---------------------------------------------------------------------------
+# NamedBarrierValue checkpoint snapshot
+# ---------------------------------------------------------------------------
+
+
+def test_named_barrier_value_checkpoint_is_a_snapshot() -> None:
+    """`NamedBarrierValue.checkpoint` must return a snapshot, not a live reference.
+
+    Regression: the old `checkpoint()` returned `self.seen` directly, so a
+    subsequent `update()` on the same channel would silently mutate the
+    saved checkpoint. The fix returns `set(self.seen)` — a snapshot —
+    matching the existing `copy()` behavior (which also uses
+    `self.seen.copy()`).
+    """
+    ch = NamedBarrierValue(str, {"a", "b"})
+    ch.update(["a"])
+
+    saved = ch.checkpoint()
+    assert saved == {"a"}
+
+    # Mutate the original; the saved checkpoint must NOT change.
+    ch.update(["b"])
+    assert saved == {"a"}, (
+        f"checkpoint() must be a snapshot, not a live reference; "
+        f"expected {{'a'}}, got {saved!r}"
+    )
+    assert ch.seen == {"a", "b"}
+
+    # The saved snapshot is a fresh set, not the live attribute.
+    assert saved is not ch.seen
+
+
+def test_named_barrier_value_after_finish_checkpoint_is_a_snapshot() -> None:
+    """`NamedBarrierValueAfterFinish.checkpoint` must also return a snapshot.
+
+    Same regression as the base class. The tuple `(seen, finished)` is
+    a value tuple, but the inner `seen` set was previously a live
+    reference. Triggered by a subsequent `update()` (which mutates
+    `seen` via `.add()`) — `consume()` reassigns the attribute, so it
+    doesn't exercise the alias bug.
+    """
+    ch = NamedBarrierValueAfterFinish(str, {"x", "y"})
+
+    # Partial state: only "x" has been seen. `finish()` requires
+    # seen == names, so don't call it yet.
+    ch.update(["x"])
+    assert ch.finished is False
+
+    saved_seen, saved_finished = ch.checkpoint()
+    assert saved_seen == {"x"}
+    assert saved_finished is False
+
+    # Trigger the bug: a subsequent `update()` (which mutates `seen` via
+    # `.add()`) would silently change the saved checkpoint.
+    ch.update(["y"])
+    assert saved_seen == {"x"}, (
+        f"checkpoint() seen must be a snapshot; expected {{'x'}}, got {saved_seen!r}"
+    )
+    assert ch.seen == {"x", "y"}
+
+    # Now finish() flips the flag; the saved snapshot is unchanged.
+    ch.finish()
+    assert ch.finished is True
+    assert saved_finished is False  # saved at the earlier point in time
