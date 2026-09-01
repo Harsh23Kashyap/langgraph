@@ -44,7 +44,11 @@ class NamedBarrierValue(Generic[Value], BaseChannel[Value, Value, set[Value]]):
         return empty
 
     def checkpoint(self) -> set[Value]:
-        return self.seen
+        # Return a snapshot, not a live reference. Otherwise, mutations to
+        # this channel (via subsequent `update()` calls) would silently
+        # change the saved checkpoint. `copy()` already does this; the
+        # checkpoint path needs the same treatment for consistency.
+        return self.seen.copy()
 
     def from_checkpoint(self, checkpoint: set[Value]) -> Self:
         empty = self.__class__(self.typ, self.names)
@@ -122,7 +126,10 @@ class NamedBarrierValueAfterFinish(
         return empty
 
     def checkpoint(self) -> tuple[set[Value], bool]:
-        return (self.seen, self.finished)
+        # Return a snapshot of `seen` (not a live reference) so subsequent
+        # `update()` calls on this channel don't silently mutate the saved
+        # checkpoint. `finished` is a bool, so it's already a value snapshot.
+        return (self.seen.copy(), self.finished)
 
     def from_checkpoint(self, checkpoint: tuple[set[Value], bool]) -> Self:
         empty = self.__class__(self.typ, self.names)
