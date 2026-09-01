@@ -105,6 +105,55 @@ def test_binop() -> None:
     assert channel.get() == 10
 
 
+def test_topic_checkpoint_is_a_snapshot() -> None:
+    """`Topic.checkpoint` must return a snapshot, not a live reference.
+
+    Regression: the old `checkpoint()` returned `self.values` (a list)
+    directly, so a subsequent `update()` (which calls
+    `self.values.extend(...)`) would silently mutate the saved
+    checkpoint through the alias. The fix returns `self.values.copy()`
+    — matching the existing `copy()` method behavior (line 60 of
+    `channels/topic.py`), which also uses `self.values.copy()`.
+    """
+    ch = Topic(str, accumulate=True)
+    ch.update(["a", "b"])
+    saved = ch.checkpoint()
+    assert saved == ["a", "b"]
+
+    ch.update(["c"])
+    assert saved == ["a", "b"], (
+        f"checkpoint() must be a snapshot, not a live reference; "
+        f"expected ['a', 'b'], got {saved!r}"
+    )
+    assert ch.values == ["a", "b", "c"]
+    assert saved is not ch.values
+
+
+def test_topic_checkpoint_accumulate_false_is_a_snapshot() -> None:
+    """`Topic.checkpoint` is a snapshot for the non-accumulating path too.
+
+    Smoke test: the bug being fixed (alias of `self.values`) only
+    manifests in `accumulate=True` because `update()` mutates the
+    list via `.extend()`. In `accumulate=False`, `update()` reassigns
+    `self.values = list[Value]()` (line 81), which breaks the alias
+    even with the buggy `return self.values`. This test guards
+    against a future refactor that switches `accumulate=False` to
+    in-place mutation (e.g., `self.values.clear()` for performance) —
+    that would silently re-introduce the bug.
+    """
+    ch = Topic(str, accumulate=False)
+    ch.update(["a"])
+    saved = ch.checkpoint()
+    assert saved == ["a"]
+
+    ch.update(["b"])
+    assert saved == ["a"], (
+        f"checkpoint() must be a snapshot, not a live reference; "
+        f"expected ['a'], got {saved!r}"
+    )
+    assert ch.values == ["b"]
+
+
 def test_untracked_value() -> None:
     channel = UntrackedValue(dict).from_checkpoint(MISSING)
     assert channel.ValueType is dict
