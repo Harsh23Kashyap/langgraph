@@ -9,6 +9,7 @@ from langgraph.checkpoint.serde.types import _DeltaSnapshot
 from typing_extensions import NotRequired, TypedDict
 
 from langgraph._internal._typing import MISSING
+from langgraph.channels.any_value import AnyValue
 from langgraph.channels.binop import BinaryOperatorAggregate
 from langgraph.channels.delta import DeltaChannel
 from langgraph.channels.last_value import LastValue
@@ -103,6 +104,35 @@ def test_binop() -> None:
     checkpoint = channel.checkpoint()
     channel = BinaryOperatorAggregate(int, operator.add).from_checkpoint(checkpoint)
     assert channel.get() == 10
+
+
+def test_any_value_checkpoint_is_a_snapshot() -> None:
+    """`AnyValue.checkpoint` must return a snapshot, not a live reference.
+
+    Regression: the old `checkpoint()` returned `self.value` directly, so
+    mutating the saved reference would silently mutate the channel's
+    internal value. `update()` always reassigns `self.value` rather than
+    mutating it, so the alias bug does not currently manifest — the fix
+    is defensive against a future refactor that switches `update()` to
+    in-place mutation.
+    """
+    ch = AnyValue(list)
+    ch.update([[1, 2, 3]])
+    saved = ch.checkpoint()
+    assert saved == [1, 2, 3]
+    assert saved is not ch.value, "checkpoint() must return a copy, not an alias"
+
+    # Mutating the saved snapshot must not affect the channel's value.
+    saved.append(99)
+    assert ch.value == [1, 2, 3], (
+        f"checkpoint() must be independent of channel state; "
+        f"expected [1, 2, 3], got {ch.value!r}"
+    )
+
+    # A later update on the channel must not affect the saved snapshot.
+    ch.update([[4, 5, 6]])
+    assert saved == [1, 2, 3, 99]
+    assert ch.get() == [4, 5, 6]
 
 
 def test_untracked_value() -> None:

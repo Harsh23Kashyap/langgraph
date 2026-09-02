@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy as _copy
 from collections.abc import Sequence
 from typing import Any, Generic
 
@@ -69,4 +70,7 @@ class AnyValue(Generic[Value], BaseChannel[Value, Value, Value]):
         return self.value is not MISSING
 
     def checkpoint(self) -> Value:
-        return self.value
+        # Snapshot the value so a saved checkpoint is not silently mutated
+        # by later activity on the channel. Same pattern as
+        # `DeltaChannel.copy()`.
+        return self.value if self.value is MISSING else _copy.copy(self.value)
