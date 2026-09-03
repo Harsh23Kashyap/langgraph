@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy as _copy
 from collections.abc import Sequence
 from typing import Any, Generic
 
@@ -108,9 +109,12 @@ class LastValueAfterFinish(
         return self.typ
 
     def checkpoint(self) -> tuple[Value | Any, bool] | Any:
+        # Snapshot the value so a saved checkpoint is not silently mutated
+        # by later activity on the channel. Same pattern as
+        # `DeltaChannel.copy()`.
         if self.value is MISSING:
-            return MISSING
-        return (self.value, self.finished)
+            return self.value
+        return (_copy.copy(self.value), self.finished)
 
     def from_checkpoint(self, checkpoint: tuple[Value | Any, bool] | Any) -> Self:
         empty = self.__class__(self.typ)
