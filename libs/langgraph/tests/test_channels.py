@@ -11,7 +11,7 @@ from typing_extensions import NotRequired, TypedDict
 from langgraph._internal._typing import MISSING
 from langgraph.channels.binop import BinaryOperatorAggregate
 from langgraph.channels.delta import DeltaChannel
-from langgraph.channels.last_value import LastValue
+from langgraph.channels.last_value import LastValue, LastValueAfterFinish
 from langgraph.channels.topic import Topic
 from langgraph.channels.untracked_value import UntrackedValue
 from langgraph.errors import EmptyChannelError, InvalidUpdateError
@@ -45,6 +45,39 @@ def test_last_value() -> None:
     checkpoint = channel.checkpoint()
     channel = LastValue(int).from_checkpoint(checkpoint)
     assert channel.get() == 4
+
+
+def test_last_value_after_finish_checkpoint_is_a_snapshot() -> None:
+    """`LastValueAfterFinish.checkpoint` must return a snapshot of the value.
+
+    Regression: the old `checkpoint()` returned `(self.value, self.finished)`
+    where `self.value` was a live alias. A consumer who saved the checkpoint
+    tuple and later mutated the channel's value would observe the mutation
+    through the saved reference. `update()` always reassigns
+    `self.value = values[-1]` rather than mutating it, so the alias bug
+    does not currently manifest — the fix is defensive against a future
+    refactor that switches `update()` to in-place mutation. `self.finished`
+    is a `bool` (immutable), so only the value needs copying.
+    """
+    ch = LastValueAfterFinish(list)
+    ch.update([[1, 2, 3]])
+    saved = ch.checkpoint()
+    assert saved == ([1, 2, 3], False)
+    assert saved[0] is not ch.value, "checkpoint() must return a copy, not an alias"
+
+    # Mutating the saved snapshot must not affect the channel's value.
+    saved[0].append(99)
+    assert ch.value == [1, 2, 3], (
+        f"checkpoint() must be independent of channel state; "
+        f"expected [1, 2, 3], got {ch.value!r}"
+    )
+
+    # A later update on the channel must not affect the saved snapshot.
+    ch.update([[4, 5, 6]])
+    assert saved == ([1, 2, 3, 99], False)
+    assert ch.consume() is False
+    ch.finish()
+    assert ch.get() == [4, 5, 6]
 
 
 def test_topic() -> None:
