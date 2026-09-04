@@ -9,8 +9,10 @@ from langgraph.checkpoint.serde.types import _DeltaSnapshot
 from typing_extensions import NotRequired, TypedDict
 
 from langgraph._internal._typing import MISSING
+from langgraph.channels.any_value import AnyValue
 from langgraph.channels.binop import BinaryOperatorAggregate
 from langgraph.channels.delta import DeltaChannel
+from langgraph.channels.ephemeral_value import EphemeralValue
 from langgraph.channels.last_value import LastValue
 from langgraph.channels.topic import Topic
 from langgraph.channels.untracked_value import UntrackedValue
@@ -45,6 +47,86 @@ def test_last_value() -> None:
     checkpoint = channel.checkpoint()
     channel = LastValue(int).from_checkpoint(checkpoint)
     assert channel.get() == 4
+
+
+def test_last_value_copy_is_a_snapshot() -> None:
+    """`LastValue.copy` must snapshot the value, not alias it."""
+    ch = LastValue(list)
+    ch.update([[1, 2, 3]])
+    cloned = ch.copy()
+    assert cloned is not ch
+    assert cloned.value is not ch.value, "copy() must snapshot the value, not alias it"
+
+    ch.update([[4, 5, 6]])
+    assert cloned.value == [1, 2, 3], (
+        f"copy() must be independent of the original channel; "
+        f"expected [1, 2, 3], got {cloned.value!r}"
+    )
+    assert ch.get() == [4, 5, 6]
+
+
+def test_any_value_copy_is_a_snapshot() -> None:
+    """`AnyValue.copy` must snapshot the value, not alias it."""
+    ch = AnyValue(list)
+    ch.update([[1, 2, 3]])
+    cloned = ch.copy()
+    assert cloned is not ch
+    assert cloned.value is not ch.value, "copy() must snapshot the value, not alias it"
+
+    ch.update([[4, 5, 6]])
+    assert cloned.value == [1, 2, 3], (
+        f"copy() must be independent of the original channel; "
+        f"expected [1, 2, 3], got {cloned.value!r}"
+    )
+    assert ch.get() == [4, 5, 6]
+
+
+def test_ephemeral_value_copy_is_a_snapshot() -> None:
+    """`EphemeralValue.copy` must snapshot the value, not alias it."""
+    ch = EphemeralValue(list)
+    ch.update([[1, 2, 3]])
+    cloned = ch.copy()
+    assert cloned is not ch
+    assert cloned.value is not ch.value, "copy() must snapshot the value, not alias it"
+
+    ch.update([[4, 5, 6]])
+    assert cloned.value == [1, 2, 3], (
+        f"copy() must be independent of the original channel; "
+        f"expected [1, 2, 3], got {cloned.value!r}"
+    )
+    assert ch.get() == [4, 5, 6]
+
+
+def test_untracked_value_copy_is_a_snapshot() -> None:
+    """`UntrackedValue.copy` must snapshot the value, not alias it."""
+    ch = UntrackedValue(dict)
+    ch.update([{"a": 1}])
+    cloned = ch.copy()
+    assert cloned is not ch
+    assert cloned.value is not ch.value, "copy() must snapshot the value, not alias it"
+
+    # Mutating the cloned value must not affect the original.
+    cloned.value["b"] = 2
+    assert ch.value == {"a": 1}, (
+        f"copy() must be independent of the original channel; "
+        f"expected {{'a': 1}}, got {ch.value!r}"
+    )
+
+
+def test_binop_copy_is_a_snapshot() -> None:
+    """`BinaryOperatorAggregate.copy` must snapshot the value, not alias it."""
+    ch = BinaryOperatorAggregate(list, operator.iadd)
+    ch.update([[1, 2, 3]])
+    cloned = ch.copy()
+    assert cloned is not ch
+    assert cloned.value is not ch.value, "copy() must snapshot the value, not alias it"
+
+    # Mutating the cloned value must not affect the original.
+    cloned.value.append(99)
+    assert ch.value == [1, 2, 3], (
+        f"copy() must be independent of the original channel; "
+        f"expected [1, 2, 3], got {ch.value!r}"
+    )
 
 
 def test_topic() -> None:
