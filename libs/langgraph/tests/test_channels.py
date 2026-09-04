@@ -12,6 +12,10 @@ from langgraph._internal._typing import MISSING
 from langgraph.channels.binop import BinaryOperatorAggregate
 from langgraph.channels.delta import DeltaChannel
 from langgraph.channels.last_value import LastValue
+from langgraph.channels.named_barrier_value import (
+    NamedBarrierValue,
+    NamedBarrierValueAfterFinish,
+)
 from langgraph.channels.topic import Topic
 from langgraph.channels.untracked_value import UntrackedValue
 from langgraph.errors import EmptyChannelError, InvalidUpdateError
@@ -45,6 +49,34 @@ def test_last_value() -> None:
     checkpoint = channel.checkpoint()
     channel = LastValue(int).from_checkpoint(checkpoint)
     assert channel.get() == 4
+
+
+def test_named_barrier_value_seen_uses_value_type() -> None:
+    """`NamedBarrierValue.seen` must accept the generic `Value` type.
+
+    Regression: the class-level annotation is `seen: set[Value]` (line 19)
+    but the instance-level annotation in `__init__` was `set[str]`. The
+    `set[str]` was a type-checker lie when `Value` was not `str` (e.g.,
+    `int`, dataclass). The fix updates the instance-level annotation to
+    `set[Value]`, matching the class-level type and the actual runtime
+    behavior (the `seen` set stores `Value` instances, not `str`).
+    """
+    ch = NamedBarrierValue(int, {1, 2, 3})
+    assert isinstance(ch.seen, set)
+    assert ch.seen == set()
+    # `seen` should accept non-str values (the whole point of `Value`).
+    ch.update([1, 2, 3])
+    assert ch.seen == {1, 2, 3}
+    assert ch.is_available()
+    ch_seen_type: set[int] = ch.seen  # type-checker probe
+    assert ch_seen_type == {1, 2, 3}
+
+    # Same check for the `_AfterFinish` variant.
+    ch2 = NamedBarrierValueAfterFinish(int, {1, 2, 3})
+    assert isinstance(ch2.seen, set)
+    assert ch2.seen == set()
+    ch2.update([1])
+    assert ch2.seen == {1}
 
 
 def test_topic() -> None:
