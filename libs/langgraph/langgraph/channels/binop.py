@@ -1,4 +1,5 @@
 import collections.abc
+import copy as _copy
 from collections.abc import Callable, Sequence
 from typing import Any, Generic
 
@@ -96,7 +97,10 @@ class BinaryOperatorAggregate(Generic[Value], BaseChannel[Value, Value, Value]):
         """Return a copy of the channel."""
         empty = self.__class__(self.typ, self.operator)
         empty.key = self.key
-        empty.value = self.value
+        # Snapshot the value so a copied channel is not silently mutated
+        # by later activity on the original. Same pattern as
+        # `DeltaChannel.copy()`.
+        empty.value = self.value if self.value is MISSING else _copy.copy(self.value)
         return empty
 
     def from_checkpoint(self, checkpoint: Value) -> Self:
