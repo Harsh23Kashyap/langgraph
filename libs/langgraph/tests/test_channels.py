@@ -11,7 +11,7 @@ from typing_extensions import NotRequired, TypedDict
 from langgraph._internal._typing import MISSING
 from langgraph.channels.binop import BinaryOperatorAggregate
 from langgraph.channels.delta import DeltaChannel
-from langgraph.channels.last_value import LastValue
+from langgraph.channels.last_value import LastValue, LastValueAfterFinish
 from langgraph.channels.topic import Topic
 from langgraph.channels.untracked_value import UntrackedValue
 from langgraph.errors import EmptyChannelError, InvalidUpdateError
@@ -45,6 +45,38 @@ def test_last_value() -> None:
     checkpoint = channel.checkpoint()
     channel = LastValue(int).from_checkpoint(checkpoint)
     assert channel.get() == 4
+
+
+def test_last_value_after_finish_update_rejects_batch() -> None:
+    """LastValueAfterFinish.update must mirror LastValue.update: reject any
+    batch with != 1 value instead of silently keeping values[-1].
+
+    Pre-fix behavior: `update([5, 6])` on a LastValueAfterFinish would
+    accept the batch and store 6 (with values[0] silently discarded).
+    The sibling LastValue.update (last_value.py:56) already raises
+    InvalidUpdateError for the same input. This test pins the
+    consistency fix.
+    """
+    channel = LastValueAfterFinish(int).from_checkpoint(MISSING)
+    assert channel.ValueType is int
+    assert channel.UpdateType is int
+
+    with pytest.raises(EmptyChannelError):
+        channel.get()
+    with pytest.raises(InvalidUpdateError):
+        channel.update([5, 6])
+    with pytest.raises(InvalidUpdateError):
+        channel.update([1, 2, 3])
+
+    # Single-value path: the happy case still works.
+    channel.update([3])
+    assert channel.consume() is False  # not finished yet
+    channel.finish()
+    assert channel.get() == 3
+    assert channel.consume() is True
+    # After consume() the value is cleared.
+    with pytest.raises(EmptyChannelError):
+        channel.get()
 
 
 def test_topic() -> None:
