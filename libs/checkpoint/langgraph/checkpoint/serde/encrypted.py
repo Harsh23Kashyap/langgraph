@@ -20,6 +20,17 @@ class EncryptedSerializer(SerializerProtocol):
         typ, data = self.serde.dumps_typed(obj)
         # encrypt data
         ciphername, ciphertext = self.cipher.encrypt(data)
+        # The type string concatenates the inner type and the cipher name with
+        # `+` as a separator; `loads_typed` splits on the first `+` to recover
+        # them. A cipher name that itself contains `+` would corrupt the
+        # round trip (the cipher name would be truncated to everything after
+        # the first `+`, and the data would be lost when the bundled cipher
+        # rejects the truncated name).
+        if "+" in ciphername:
+            raise ValueError(
+                f"ciphername must not contain '+': got {ciphername!r}. "
+                "The EncryptedSerializer uses '+' as the type-string separator."
+            )
         # add cipher name to type
         return f"{typ}+{ciphername}", ciphertext
 

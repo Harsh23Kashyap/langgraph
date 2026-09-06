@@ -57,6 +57,21 @@ class _PassthroughCipher(CipherProtocol):
         return ciphertext
 
 
+class _CiphernamePlusCipher(CipherProtocol):
+    """Test cipher that returns a ciphername containing `+`.
+
+    Used to verify the EncryptedSerializer rejects cipher names that would
+    corrupt the `typ+ciphername` round-trip. The decrypt side would never
+    be reached in normal use because dumps_typed raises first.
+    """
+
+    def encrypt(self, plaintext: bytes) -> tuple[str, bytes]:
+        return "aes+v2", plaintext
+
+    def decrypt(self, ciphername: str, ciphertext: bytes) -> bytes:
+        raise AssertionError("decrypt should not be called: dumps_typed should raise")
+
+
 def _make_encrypted_serde(
     allowed_msgpack_modules: (
         _lg_msgpack.AllowedMsgpackModules | Literal[True] | None | object
@@ -444,3 +459,40 @@ def test_with_allowlist_uses_copy_protocol() -> None:
     assert updated is not saver
     assert updated.copy_was_used is True
     assert saver.copy_was_used is False
+
+
+def test_ciphername_with_plus_separator_is_rejected() -> None:
+    """EncryptedSerializer must reject a cipher name that contains '+'.
+
+    The type-string layout is `typ+ciphername` and `loads_typed` splits on
+    the first `+` to recover the two parts. A cipher name that itself
+    contains `+` would be truncated to everything after the first `+`,
+    and the data would be lost when the bundled cipher rejects the
+    truncated name. The serializer should fail fast at encrypt time with
+    a clear error rather than silently corrupt the round trip.
+    """
+    serde = EncryptedSerializer(
+        _CiphernamePlusCipher(),
+        JsonPlusSerializer(allowed_msgpack_modules=None),
+    )
+
+    with pytest.raises(ValueError, match="ciphername must not contain"):
+        serde.dumps_typed({"key": "value"})
+
+
+def test_ciphername_without_plus_round_trips() -> None:
+    """Regression guard: a ciphername without '+' still round-trips.
+
+    The new validation only rejects cipher names that contain `+`. The
+    bundled `from_pycryptodome_aes` cipher returns 'aes' (no '+'), so the
+    existing happy path is preserved.
+    """
+    serde = EncryptedSerializer.from_pycryptodome_aes(
+        serde=JsonPlusSerializer(allowed_msgpack_modules=None),
+        key=b"1234567890123456",
+    )
+
+    obj = {"key": "value", "n": 42}
+    dumped = serde.dumps_typed(obj)
+    assert "+aes" in dumped[0]
+    assert serde.loads_typed(dumped) == obj
