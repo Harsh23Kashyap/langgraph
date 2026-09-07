@@ -25,6 +25,7 @@ from langchain_core.runnables import (
 from langchain_core.runnables.graph import Edge
 from langchain_core.version import VERSION as LANGCHAIN_CORE_VERSION
 from langgraph.cache.base import BaseCache
+from langgraph.cache.memory import InMemoryCache
 from langgraph.checkpoint.base import (
     BaseCheckpointSaver,
     Checkpoint,
@@ -9686,3 +9687,66 @@ async def test_delta_channel_async_write_ordering() -> None:
 
     state = await graph.aget_state(config)
     assert len(state.values["messages"]) == 6  # 3 human + 3 AI
+
+
+def test_clear_cache_unknown_node_raises() -> None:
+    """clear_cache must raise ValueError for unknown node names, not silently skip.
+
+    Regression: pre-fix, `clear_cache(["unknown_node"])` would silently return
+    without clearing anything, leaving the user with stale cache entries and
+    no indication that their request did nothing.
+    """
+
+    class State(TypedDict):
+        x: int
+
+    def node_a(state: State) -> State:
+        return {"x": state["x"] + 1}
+
+    graph = (
+        StateGraph(State)
+        .add_node("a", node_a)
+        .set_entry_point("a")
+        .set_finish_point("a")
+        .compile(cache=InMemoryCache())
+    )
+
+    # Sanity check: clearing all nodes (the default) works.
+    graph.clear_cache()
+
+    # Sanity check: clearing a known node works.
+    graph.clear_cache(["a"])
+
+    # The bug: unknown node name was silently skipped.
+    with pytest.raises(ValueError, match="not found in graph"):
+        graph.clear_cache(["does_not_exist"])
+
+
+def test_clear_cache_partial_unknown_raises() -> None:
+    """clear_cache must raise if ANY of the requested nodes is unknown."""
+
+    class State(TypedDict):
+        x: int
+
+    def node_a(state: State) -> State:
+        return {"x": state["x"] + 1}
+
+    def node_b(state: State) -> State:
+        return {"x": state["x"] * 2}
+
+    graph = (
+        StateGraph(State)
+        .add_node("a", node_a)
+        .add_node("b", node_b)
+        .set_entry_point("a")
+        .set_finish_point("a")
+        .compile(cache=InMemoryCache())
+    )
+
+    # Mixed: one known, one unknown. Must raise (atomic).
+    with pytest.raises(ValueError, match="not found in graph"):
+        graph.clear_cache(["a", "missing"])
+
+    # Reversed order: also raises.
+    with pytest.raises(ValueError, match="not found in graph"):
+        graph.clear_cache(["missing", "a"])

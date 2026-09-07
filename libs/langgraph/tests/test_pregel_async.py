@@ -26,6 +26,7 @@ from langchain_core.runnables import RunnableConfig, RunnableLambda, RunnablePas
 from langchain_core.utils.aiter import aclosing
 from langchain_core.version import VERSION as LANGCHAIN_CORE_VERSION
 from langgraph.cache.base import BaseCache
+from langgraph.cache.memory import InMemoryCache
 from langgraph.checkpoint.base import (
     BaseCheckpointSaver,
     ChannelVersions,
@@ -9727,3 +9728,36 @@ async def test_node_error_handler_handles_subgraph_internal_failure_async() -> N
     assert result["foo"] == "handled_async_subgraph"
     assert captured["from_node_name"] == "subgraph_node"
     assert isinstance(captured["from_node_error"], BaseException)
+
+
+async def test_aclear_cache_unknown_node_raises() -> None:
+    """aclear_cache must raise ValueError for unknown node names, not silently skip.
+
+    Regression: pre-fix, `aclear_cache(["unknown_node"])` would silently return
+    without clearing anything, leaving the user with stale cache entries and
+    no indication that their request did nothing.
+    """
+
+    class State(TypedDict):
+        x: int
+
+    async def node_a(state: State) -> State:
+        return {"x": state["x"] + 1}
+
+    graph = (
+        StateGraph(State)
+        .add_node("a", node_a)
+        .set_entry_point("a")
+        .set_finish_point("a")
+        .compile(cache=InMemoryCache())
+    )
+
+    # Sanity check: clearing all nodes (the default) works.
+    await graph.aclear_cache()
+
+    # Sanity check: clearing a known node works.
+    await graph.aclear_cache(["a"])
+
+    # The bug: unknown node name was silently skipped.
+    with pytest.raises(ValueError, match="not found in graph"):
+        await graph.aclear_cache(["does_not_exist"])

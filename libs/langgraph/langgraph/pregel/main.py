@@ -4153,17 +4153,22 @@ class Pregel(
         if not self.cache:
             raise ValueError("No cache is set for this graph. Cannot clear cache.")
         nodes = nodes or self.nodes.keys()
+        unknown = [n for n in nodes if n not in self.nodes]
+        if unknown:
+            raise ValueError(
+                f"Node(s) {unknown} not found in graph. "
+                f"Available nodes: {sorted(self.nodes)}"
+            )
         # collect namespaces to clear
         namespaces: list[tuple[str, ...]] = []
         for node in nodes:
-            if node in self.nodes:
-                namespaces.append(
-                    (
-                        CACHE_NS_WRITES,
-                        (identifier(self.nodes[node]) or "__dynamic__"),
-                        node,
-                    ),
-                )
+            namespaces.append(
+                (
+                    CACHE_NS_WRITES,
+                    (identifier(self.nodes[node]) or "__dynamic__"),
+                    node,
+                ),
+            )
         # clear cache
         self.cache.clear(namespaces)
 
@@ -4172,17 +4177,22 @@ class Pregel(
         if not self.cache:
             raise ValueError("No cache is set for this graph. Cannot clear cache.")
         nodes = nodes or self.nodes.keys()
+        unknown = [n for n in nodes if n not in self.nodes]
+        if unknown:
+            raise ValueError(
+                f"Node(s) {unknown} not found in graph. "
+                f"Available nodes: {sorted(self.nodes)}"
+            )
         # collect namespaces to clear
         namespaces: list[tuple[str, ...]] = []
         for node in nodes:
-            if node in self.nodes:
-                namespaces.append(
-                    (
-                        CACHE_NS_WRITES,
-                        (identifier(self.nodes[node]) or "__dynamic__"),
-                        node,
-                    ),
-                )
+            namespaces.append(
+                (
+                    CACHE_NS_WRITES,
+                    (identifier(self.nodes[node]) or "__dynamic__"),
+                    node,
+                ),
+            )
         # clear cache
         await self.cache.aclear(namespaces)
 
