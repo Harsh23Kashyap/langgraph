@@ -3,7 +3,7 @@ from __future__ import annotations
 import sys
 from collections import deque
 from collections.abc import Callable, Hashable, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import timedelta
 from typing import (
     TYPE_CHECKING,
@@ -413,7 +413,8 @@ class GraphOutput(Generic[OutputT]):
 _DC_KWARGS = {"kw_only": True, "slots": True, "frozen": True}
 
 
-class RetryPolicy(NamedTuple):
+@dataclass(**_DC_KWARGS)
+class RetryPolicy:
     """Configuration for retrying nodes.
 
     !!! version-added "Added in version 0.2.24"
@@ -431,8 +432,29 @@ class RetryPolicy(NamedTuple):
     """Whether to add random jitter to the interval between retries."""
     retry_on: (
         type[Exception] | Sequence[type[Exception]] | Callable[[Exception], bool]
-    ) = default_retry_on
+    ) = field(default_factory=lambda: default_retry_on)
     """List of exception classes that should trigger a retry, or a callable that returns `True` for exceptions that should trigger a retry."""
+
+    def __post_init__(self) -> None:
+        # Reject values that would produce nonsensical runtime behavior.
+        # `initial_interval <= 0` would mean "retry immediately" (or before
+        # the first attempt completes). `backoff_factor <= 0` would shrink
+        # the delay instead of growing it. `max_interval < initial_interval`
+        # would silently clamp. `max_attempts < 1` would mean "make 0 or
+        # fewer attempts". Mirrors the `_coerce_timeout_seconds` pattern.
+        if self.initial_interval <= 0:
+            raise ValueError(
+                f"initial_interval must be > 0, got {self.initial_interval}"
+            )
+        if self.backoff_factor <= 0:
+            raise ValueError(f"backoff_factor must be > 0, got {self.backoff_factor}")
+        if self.max_interval < self.initial_interval:
+            raise ValueError(
+                f"max_interval ({self.max_interval}) must be >= "
+                f"initial_interval ({self.initial_interval})"
+            )
+        if self.max_attempts < 1:
+            raise ValueError(f"max_attempts must be >= 1, got {self.max_attempts}")
 
 
 def _coerce_timeout_seconds(

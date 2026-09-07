@@ -795,7 +795,7 @@ async def test_arun_with_retry_timeout_retries_when_retry_on_timeout():
 
     policy = RetryPolicy(
         max_attempts=3,
-        initial_interval=0.0,
+        initial_interval=0.01,
         jitter=False,
         retry_on=NodeTimeoutError,
     )
@@ -905,7 +905,7 @@ async def test_arun_with_retry_does_not_swallow_proc_asyncio_timeout():
     # would be retried, and `calls` would be 2.
     policy = RetryPolicy(
         max_attempts=2,
-        initial_interval=0.0,
+        initial_interval=0.01,
         jitter=False,
         retry_on=NodeTimeoutError,
     )
@@ -1110,7 +1110,7 @@ async def test_arun_with_retry_timeout_discards_stale_executor_writes():
 
     policy = RetryPolicy(
         max_attempts=2,
-        initial_interval=0.0,
+        initial_interval=0.01,
         jitter=False,
         retry_on=NodeTimeoutError,
     )
@@ -1494,7 +1494,7 @@ async def test_state_graph_add_node_timeout_composes_with_retry():
         timeout=TimeoutPolicy(idle_timeout=0.3),
         retry_policy=RetryPolicy(
             max_attempts=3,
-            initial_interval=0.0,
+            initial_interval=0.01,
             jitter=False,
             retry_on=NodeTimeoutError,
         ),
@@ -1665,7 +1665,7 @@ async def test_arun_with_retry_timeout_observer_tracks_attempts():
 
     policy = RetryPolicy(
         max_attempts=2,
-        initial_interval=0.0,
+        initial_interval=0.01,
         jitter=False,
         retry_on=NodeTimeoutError,
     )
@@ -1930,7 +1930,7 @@ async def test_arun_with_retry_observer_emits_finish_before_final_raise_on_exhau
 
     policy = RetryPolicy(
         max_attempts=2,
-        initial_interval=0.0,
+        initial_interval=0.01,
         jitter=False,
         retry_on=NodeTimeoutError,
     )
@@ -2941,3 +2941,62 @@ async def test_pregel_user_raised_cancellederror_fails_run():
     with pytest.raises(NodeCancelledError) as excinfo:
         await graph.ainvoke({"vals": []})
     assert excinfo.value.node == "boom"
+
+
+def test_retry_policy_validates_inputs() -> None:
+    """RetryPolicy rejects values that would produce nonsensical runtime behavior.
+
+    Pre-fix: a user could pass `RetryPolicy(initial_interval=-1)`,
+    `RetryPolicy(max_attempts=0)`, or any other non-positive / inconsistent
+    numeric value and the policy would be accepted. The resulting retry
+    schedule would silently do the wrong thing (immediate retry, no
+    attempts, an interval that decreases). The fix adds an `__new__`
+    override that mirrors the `_coerce_timeout_seconds` validation
+    pattern in `types.py`.
+    """
+    # Non-positive initial_interval: would mean "retry immediately".
+    with pytest.raises(ValueError, match="initial_interval must be > 0"):
+        RetryPolicy(initial_interval=0)
+    with pytest.raises(ValueError, match="initial_interval must be > 0"):
+        RetryPolicy(initial_interval=-1.0)
+
+    # Non-positive backoff_factor: would shrink the delay.
+    with pytest.raises(ValueError, match="backoff_factor must be > 0"):
+        RetryPolicy(backoff_factor=0)
+    with pytest.raises(ValueError, match="backoff_factor must be > 0"):
+        RetryPolicy(backoff_factor=-2.0)
+
+    # max_interval < initial_interval: would silently clamp.
+    with pytest.raises(
+        ValueError,
+        match=r"max_interval \(1\.0\) must be >= initial_interval \(5\.0\)",
+    ):
+        RetryPolicy(initial_interval=5.0, max_interval=1.0)
+
+    # max_attempts < 1: would mean "make 0 attempts" or "make -3 attempts".
+    with pytest.raises(ValueError, match="max_attempts must be >= 1"):
+        RetryPolicy(max_attempts=0)
+    with pytest.raises(ValueError, match="max_attempts must be >= 1"):
+        RetryPolicy(max_attempts=-3)
+
+    # Regression guard: defaults still work.
+    policy = RetryPolicy()
+    assert policy.initial_interval == 0.5
+    assert policy.backoff_factor == 2.0
+    assert policy.max_interval == 128.0
+    assert policy.max_attempts == 3
+    assert policy.jitter is True
+
+    # Regression guard: valid overrides still work.
+    policy = RetryPolicy(
+        initial_interval=1.0,
+        backoff_factor=1.5,
+        max_interval=30.0,
+        max_attempts=5,
+        jitter=False,
+    )
+    assert policy.initial_interval == 1.0
+    assert policy.backoff_factor == 1.5
+    assert policy.max_interval == 30.0
+    assert policy.max_attempts == 5
+    assert policy.jitter is False
