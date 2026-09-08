@@ -54,7 +54,12 @@ from pytest_mock import MockerFixture
 from syrupy import SnapshotAssertion
 from typing_extensions import NotRequired, TypedDict
 
-from langgraph._internal._constants import CONFIG_KEY_NODE_FINISHED, ERROR, PULL
+from langgraph._internal._constants import (
+    CONFIG_KEY_NODE_FINISHED,
+    ERROR,
+    PULL,
+    RESERVED,
+)
 from langgraph.channels.binop import BinaryOperatorAggregate
 from langgraph.channels.delta import DeltaChannel
 from langgraph.channels.ephemeral_value import EphemeralValue
@@ -135,6 +140,66 @@ def test_graph_validation() -> None:
 
     with pytest.raises(InvalidUpdateError, match="At key 'hello'"):
         graph.invoke({"hello": "there"})
+
+
+def test_add_node_rejects_reserved_name_eagerly() -> None:
+    """add_node must reject names in langgraph._internal._constants.RESERVED eagerly.
+
+    Regression: pre-fix, add_node only checked against `START` and `END`, so a
+    user could call `add_node("__input__", my_func)` and only see the
+    `ValueError("Node name '__input__' is reserved")` at `compile()` time from
+    `validate_graph` (pregel/_validate.py:26-30). The error message and call
+    site were surprising — `add_node` is supposed to be self-validating.
+
+    This test verifies that the eager check exists, fires for every entry in
+    the RESERVED set, and uses the same error message as the deferred
+    `validate_graph` check so existing log/grep-based diagnostics keep working.
+    """
+
+    class State(TypedDict):
+        x: int
+
+    def my_node(state: State) -> State:
+        return state
+
+    # A non-reserved name still works.
+    StateGraph(State).add_node("a", my_node)
+
+    # Sanity check: the existing START/END check still fires.
+    for reserved_shortcut in ("__start__", "__end__"):
+        with pytest.raises(ValueError, match="is reserved"):
+            StateGraph(State).add_node(reserved_shortcut, my_node)
+
+    # The bug: every full RESERVED name used to slip past add_node.
+    for name in sorted(RESERVED):
+        # Skip the START/END shortcut strings; the existing check covers those.
+        if name in ("__start__", "__end__"):
+            continue
+        with pytest.raises(ValueError, match="is reserved"):
+            StateGraph(State).add_node(name, my_node)
+
+
+def test_add_node_reserved_name_does_not_poison_nodes_dict() -> None:
+    """A failed add_node call must not leave a partial entry in self.nodes."""
+
+    class State(TypedDict):
+        x: int
+
+    def my_node(state: State) -> State:
+        return state
+
+    builder = StateGraph(State)
+    builder.add_node("valid", my_node)
+
+    # The reserved-name error fires before self.nodes is mutated, so a later
+    # compile() of a well-formed graph on the same builder still works.
+    with pytest.raises(ValueError, match="is reserved"):
+        builder.add_node("__input__", my_node)
+
+    builder.set_entry_point("valid")
+    builder.set_finish_point("valid")
+    compiled = builder.compile()
+    assert compiled.invoke({"x": 1}) == {"x": 1}
 
 
 def test_request_drain_allows_inflight_call_scheduling(
