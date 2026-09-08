@@ -37,6 +37,7 @@ from langgraph._internal._constants import (
     INTERRUPT,
     NS_END,
     NS_SEP,
+    RESERVED,
     TASKS,
 )
 from langgraph._internal._fields import (
@@ -803,6 +804,8 @@ class StateGraph(Generic[StateT, ContextT, InputT, OutputT]):
             raise ValueError(f"Node `{node}` already present.")
         if node == END or node == START:
             raise ValueError(f"Node `{node}` is reserved.")
+        if node in RESERVED:
+            raise ValueError(f"Node name '{node}' is reserved")
 
         for character in (NS_SEP, NS_END):
             if character in node:
