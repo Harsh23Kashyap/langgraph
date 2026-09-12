@@ -13,7 +13,7 @@ from langgraph._internal._constants import OVERWRITE
 from langgraph._internal._typing import MISSING
 from langgraph.channels.binop import BinaryOperatorAggregate, _get_overwrite
 from langgraph.channels.delta import DeltaChannel
-from langgraph.channels.last_value import LastValue
+from langgraph.channels.last_value import LastValue, LastValueAfterFinish
 from langgraph.channels.topic import Topic
 from langgraph.channels.untracked_value import UntrackedValue
 from langgraph.errors import EmptyChannelError, InvalidUpdateError
@@ -796,3 +796,59 @@ def test_delta_channel_from_checkpoint_seed_none_is_distinct_from_sentinel() -> 
     ch = spec.from_checkpoint(None)
     ch.replay_writes([("t0", "x", "after")])
     assert ch.get() == "after"
+
+
+def test_last_value_after_finish_from_checkpoint_missing() -> None:
+    """`from_checkpoint(MISSING)` starts the channel empty and not finished."""
+    ch = LastValueAfterFinish(int).from_checkpoint(MISSING)
+    assert ch.finished is False
+    with pytest.raises(EmptyChannelError):
+        ch.get()
+
+
+def test_last_value_after_finish_from_checkpoint_tuple() -> None:
+    """`from_checkpoint((value, finished))` restores both fields."""
+    ch = LastValueAfterFinish(int).from_checkpoint((42, True))
+    assert ch.value == 42
+    assert ch.finished is True
+    # `get()` requires `finished=True`; the restored channel is already finished.
+    assert ch.get() == 42
+    # `consume()` after `finish()` clears the value.
+    assert ch.consume() is True
+    assert ch.value is MISSING
+    assert ch.finished is False
+    with pytest.raises(EmptyChannelError):
+        ch.get()
+
+
+def test_last_value_after_finish_from_checkpoint_bare_value() -> None:
+    """`from_checkpoint(<bare>)` treats the bare value as `(value, not finished)`.
+
+    Regression: the previous implementation unconditionally tuple-unpacked
+    the input, so a bare value (e.g. from a different on-disk format, a
+    manual copy, or a misuse) crashed with `cannot unpack non-iterable X`
+    or `too many values to unpack`. The fix matches the
+    `DeltaChannel.from_checkpoint` pattern: handle MISSING / wrapped
+    tuple / bare value. A bare value starts the channel not-finished
+    because that is the only safe assumption when the finished state
+    is unknown.
+    """
+    # Bare int (non-iterable).
+    ch = LastValueAfterFinish(int).from_checkpoint(42)
+    assert ch.value == 42
+    assert ch.finished is False
+
+    # Bare string (iterable, but wrong cardinality).
+    ch = LastValueAfterFinish(str).from_checkpoint("hello")
+    assert ch.value == "hello"
+    assert ch.finished is False
+
+    # 1-element iterable (wrong cardinality).
+    ch = LastValueAfterFinish(int).from_checkpoint([42])
+    assert ch.value == [42]
+    assert ch.finished is False
+
+    # 3-element tuple (wrong cardinality).
+    ch = LastValueAfterFinish(int).from_checkpoint((42, True, "extra"))
+    assert ch.value == (42, True, "extra")
+    assert ch.finished is False
