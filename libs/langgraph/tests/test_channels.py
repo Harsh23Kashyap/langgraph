@@ -11,6 +11,7 @@ from typing_extensions import NotRequired, TypedDict
 
 from langgraph._internal._constants import OVERWRITE
 from langgraph._internal._typing import MISSING
+from langgraph.channels.any_value import AnyValue
 from langgraph.channels.binop import BinaryOperatorAggregate, _get_overwrite
 from langgraph.channels.delta import DeltaChannel
 from langgraph.channels.last_value import LastValue
@@ -47,6 +48,58 @@ def test_last_value() -> None:
     checkpoint = channel.checkpoint()
     channel = LastValue(int).from_checkpoint(checkpoint)
     assert channel.get() == 4
+
+
+def test_any_value_update_rejects_batch() -> None:
+    """AnyValue.update must mirror LastValue.update: reject any batch with
+    != 1 value instead of silently keeping values[-1].
+
+    Pre-fix behavior: `update([5, 6])` on an AnyValue would accept the
+    batch and store 6 (with values[0] silently discarded). The sibling
+    LastValue.update (last_value.py:56) already raises
+    InvalidUpdateError for the same input. This test pins the consistency
+    fix.
+
+    Also covers the empty-batch path (returns False instead of raising)
+    and the clear-on-empty semantics: `update([])` after a value was set
+    clears the channel, while `update([])` on an empty channel returns
+    False without raising.
+    """
+    channel = AnyValue(int).from_checkpoint(MISSING)
+    assert channel.ValueType is int
+    assert channel.UpdateType is int
+
+    with pytest.raises(EmptyChannelError):
+        channel.get()
+
+    # The bug: silent last-value-take with no diagnostic.
+    with pytest.raises(InvalidUpdateError):
+        channel.update([5, 6])
+    with pytest.raises(InvalidUpdateError):
+        channel.update([1, 2, 3])
+
+    # Empty batch on an empty channel: no-op, returns False, no raise.
+    assert channel.update([]) is False
+    with pytest.raises(EmptyChannelError):
+        channel.get()
+
+    # Single-value happy path still works.
+    channel.update([3])
+    assert channel.get() == 3
+    channel.update([4])
+    assert channel.get() == 4
+
+    # Empty batch after a value was set: clears the channel, returns True.
+    assert channel.update([]) is True
+    with pytest.raises(EmptyChannelError):
+        channel.get()
+
+    # Checkpoint round-trip preserves the cleared state.
+    checkpoint = channel.checkpoint()
+    assert checkpoint is MISSING
+    channel = AnyValue(int).from_checkpoint(checkpoint)
+    with pytest.raises(EmptyChannelError):
+        channel.get()
 
 
 def test_topic() -> None:
