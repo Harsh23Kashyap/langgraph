@@ -7,7 +7,12 @@ from typing_extensions import Self
 
 from langgraph._internal._typing import MISSING
 from langgraph.channels.base import BaseChannel, Value
-from langgraph.errors import EmptyChannelError
+from langgraph.errors import (
+    EmptyChannelError,
+    ErrorCode,
+    InvalidUpdateError,
+    create_error_message,
+)
 
 __all__ = ("AnyValue",)
 
@@ -56,6 +61,13 @@ class AnyValue(Generic[Value], BaseChannel[Value, Value, Value]):
             else:
                 self.value = MISSING
                 return True
+
+        if len(values) != 1:
+            msg = create_error_message(
+                message=f"At key '{self.key}': Can receive only one value per step. Use an Annotated key to handle multiple values.",
+                error_code=ErrorCode.INVALID_CONCURRENT_GRAPH_UPDATE,
+            )
+            raise InvalidUpdateError(msg)
 
         self.value = values[-1]
         return True
