@@ -208,6 +208,24 @@ class TestMemorySaver:
         assert len(search_results_4) == 0
 
 
+class FalsySerializer:
+    def __bool__(self) -> bool:
+        return False
+
+    def dumps_typed(self, obj: Any) -> tuple[str, bytes]:
+        return "value", str(obj).encode()
+
+    def loads_typed(self, data: tuple[str, bytes]) -> Any:
+        return data[1].decode()
+
+
+def test_memory_saver_honors_falsy_serializer() -> None:
+    serde = FalsySerializer()
+    memory_saver = InMemorySaver(serde=serde)
+
+    assert memory_saver.serde is serde
+
+
 async def test_memory_saver() -> None:
     memory_saver = InMemorySaver()
     assert isinstance(memory_saver, InMemorySaver)
