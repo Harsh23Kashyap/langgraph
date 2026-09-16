@@ -1486,6 +1486,8 @@ class Pregel(
         limit: int | None = None,
     ) -> Iterator[StateSnapshot]:
         """Get the history of the state of the graph."""
+        if limit is not None and limit < 1:
+            raise ValueError("limit must be at least 1")
         config = ensure_config(config)
         checkpointer: BaseCheckpointSaver | None = config[CONF].get(
             CONFIG_KEY_CHECKPOINTER, self.checkpointer
@@ -1539,6 +1541,8 @@ class Pregel(
         limit: int | None = None,
     ) -> AsyncIterator[StateSnapshot]:
         """Asynchronously get the history of the state of the graph."""
+        if limit is not None and limit < 1:
+            raise ValueError("limit must be at least 1")
         config = ensure_config(config)
         checkpointer: BaseCheckpointSaver | None = ensure_config(config)[CONF].get(
             CONFIG_KEY_CHECKPOINTER, self.checkpointer

@@ -9716,3 +9716,46 @@ async def test_node_error_handler_handles_subgraph_internal_failure_async() -> N
     assert result["foo"] == "handled_async_subgraph"
     assert captured["from_node_name"] == "subgraph_node"
     assert isinstance(captured["from_node_error"], BaseException)
+
+
+async def test_aget_state_history_limit_validation() -> None:
+    """aget_state_history must reject limit values < 1, mirroring the sync sibling.
+
+    Regression: pre-fix, aget_state_history accepted `limit=0` (silently
+    returned an empty history) and `limit=-1` (undefined behavior).
+    The sync get_state_history fix (see test_get_state_history_limit_validation)
+    adds the same validation; this test pins the async sibling.
+    """
+
+    class State(TypedDict):
+        x: int
+
+    async def my_node(state: State) -> State:
+        return state
+
+    graph = (
+        StateGraph(State)
+        .add_node("a", my_node)
+        .set_entry_point("a")
+        .set_finish_point("a")
+        .compile(checkpointer=InMemorySaver())
+    )
+
+    config = {"configurable": {"thread_id": "1"}}
+    await graph.ainvoke({"x": 1}, config)
+
+    # limit=None still works.
+    assert len([c async for c in graph.aget_state_history(config)]) >= 1
+
+    # limit=1 still works.
+    assert len([c async for c in graph.aget_state_history(config, limit=1)]) == 1
+
+    # The bug: limit=0 silently returns empty.
+    with pytest.raises(ValueError, match="limit must be at least 1"):
+        async for _ in graph.aget_state_history(config, limit=0):
+            pass
+
+    # The bug: limit=-1 is undefined.
+    with pytest.raises(ValueError, match="limit must be at least 1"):
+        async for _ in graph.aget_state_history(config, limit=-1):
+            pass

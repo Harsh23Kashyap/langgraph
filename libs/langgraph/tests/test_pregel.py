@@ -9666,3 +9666,51 @@ async def test_delta_channel_async_write_ordering() -> None:
 
     state = await graph.aget_state(config)
     assert len(state.values["messages"]) == 6  # 3 human + 3 AI
+
+
+def test_get_state_history_limit_validation() -> None:
+    """get_state_history must reject limit values < 1.
+
+    Regression: pre-fix, get_state_history accepted `limit=0` (silently
+    returned an empty history) and `limit=-1` (undefined behavior
+    depending on the checkpointer implementation). The sibling
+    recursion_limit validation at pregel/main.py:2563-2564 raises
+    ValueError for the same class of input — the same pattern applies
+    here because limit is the pagination equivalent.
+    """
+
+    class State(TypedDict):
+        x: int
+
+    def my_node(state: State) -> State:
+        return state
+
+    graph = (
+        StateGraph(State)
+        .add_node("a", my_node)
+        .set_entry_point("a")
+        .set_finish_point("a")
+        .compile(checkpointer=InMemorySaver())
+    )
+
+    config = {"configurable": {"thread_id": "1"}}
+    graph.invoke({"x": 1}, config)
+
+    # limit=None still works (returns all checkpoints).
+    assert len(list(graph.get_state_history(config))) >= 1
+
+    # limit=1 still works.
+    assert len(list(graph.get_state_history(config, limit=1))) == 1
+
+    # The bug: limit=0 silently returns empty.
+    with pytest.raises(ValueError, match="limit must be at least 1"):
+        list(graph.get_state_history(config, limit=0))
+
+    # The bug: limit=-1 is undefined.
+    with pytest.raises(ValueError, match="limit must be at least 1"):
+        list(graph.get_state_history(config, limit=-1))
+
+    # Even before any checkpoints exist, the limit check fires first.
+    empty_config = {"configurable": {"thread_id": "2"}}
+    with pytest.raises(ValueError, match="limit must be at least 1"):
+        list(graph.get_state_history(empty_config, limit=0))
