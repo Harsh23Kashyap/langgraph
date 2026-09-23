@@ -60,6 +60,7 @@ from langgraph.pregel._retry import (
 from langgraph.pregel.protocol import StreamProtocol
 from langgraph.runtime import DEFAULT_RUNTIME, ExecutionInfo, Runtime
 from langgraph.types import (
+    CachePolicy,
     Command,
     PregelExecutableTask,
     RetryPolicy,
@@ -2939,3 +2940,44 @@ async def test_pregel_user_raised_cancellederror_fails_run():
     with pytest.raises(NodeCancelledError) as excinfo:
         await graph.ainvoke({"vals": []})
     assert excinfo.value.node == "boom"
+
+
+def test_cache_policy_ttl_validation() -> None:
+    """CachePolicy.ttl must be a positive integer (or None for no expiry).
+
+    Regression: pre-fix, CachePolicy(ttl=0) and CachePolicy(ttl=-1) were
+    silently accepted. The resulting cache.set(..., ttl=0) or ttl=-1
+    call had cache-implementation-defined behavior (InMemoryCache stored
+    it; other backends might immediately evict, treat as expired, or
+    raise). The sibling int validation patterns (recursion_limit at
+    pregel/main.py:2563-2564, get_state_history limit at pregel/main.py:1488,
+    RetryPolicy at types.py via PR #24) all raise for invalid values
+    at construction time. CachePolicy was the only one missing.
+
+    The validation is added as a __post_init__ method on the dataclass,
+    mirroring RetryPolicy's pattern from PR #24.
+    """
+
+    # ttl=None still works (no expiry).
+    policy = CachePolicy(ttl=None)
+    assert policy.ttl is None
+
+    # ttl=1 still works (positive integer).
+    policy = CachePolicy(ttl=1)
+    assert policy.ttl == 1
+
+    # ttl=60 still works (normal positive integer).
+    policy = CachePolicy(ttl=60)
+    assert policy.ttl == 60
+
+    # The bug: ttl=0 silently accepted.
+    with pytest.raises(ValueError, match="ttl must be at least 1"):
+        CachePolicy(ttl=0)
+
+    # The bug: ttl=-1 silently accepted.
+    with pytest.raises(ValueError, match="ttl must be at least 1"):
+        CachePolicy(ttl=-1)
+
+    # Default (ttl=None) still works.
+    policy = CachePolicy()
+    assert policy.ttl is None
