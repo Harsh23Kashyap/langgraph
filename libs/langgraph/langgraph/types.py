@@ -528,6 +528,10 @@ class CachePolicy(Generic[KeyFuncT]):
     ttl: int | None = None
     """Time to live for the cache entry in seconds. If `None`, the entry never expires."""
 
+    def __post_init__(self) -> None:
+        if self.ttl is not None and self.ttl < 1:
+            raise ValueError("ttl must be at least 1")
+
 
 @dataclass(**_DC_KWARGS)
 class TracePolicy:
