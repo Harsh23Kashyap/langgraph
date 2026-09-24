@@ -1018,6 +1018,13 @@ class StateGraph(Generic[StateT, ContextT, InputT, OutputT]):
         # find a name for the condition
         path = coerce_to_runnable(path, name=None, trace=True)
         name = path.name or "condition"
+        # validate the source node exists; START is the entry sentinel and
+        # is never in self.nodes but is a valid source. Without this check
+        # the `self.branches[source]` access below (defaultdict) silently
+        # creates an entry for an unknown source, masking user errors until
+        # compile() or runtime.
+        if source != START and source not in self.nodes:
+            raise ValueError(f"Need to add_node `{source}` first")
         # validate the condition
         if name in self.branches[source]:
             raise ValueError(

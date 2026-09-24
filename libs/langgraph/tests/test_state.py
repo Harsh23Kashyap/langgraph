@@ -12,6 +12,7 @@ from typing_extensions import NotRequired, Required, TypedDict
 
 from langgraph.channels.binop import BinaryOperatorAggregate
 from langgraph.channels.ephemeral_value import EphemeralValue
+from langgraph.constants import END, START
 from langgraph.graph.state import (
     StateGraph,
     _get_node_name,
@@ -371,3 +372,55 @@ def test_is_field_channel() -> None:
     # No channel cases
     assert _is_field_channel(int) is None
     assert _is_field_channel(Annotated[int, "just_metadata"]) is None
+
+
+def _passthrough(state: dict) -> dict:
+    return state
+
+
+def test_add_conditional_edges_raises_on_unknown_source() -> None:
+    """add_conditional_edges must reject a source that was never add_node'd.
+
+    Without this check, `self.branches[source]` (a defaultdict at state.py:253)
+    silently creates an entry for the unknown source, masking the typo until
+    compile() or first execution. This is the single-start edge-validation
+    counterpart, scoped to add_conditional_edges because the multi-start
+    `add_edge` already does this check (state.py:963).
+    """
+    builder = StateGraph(dict)
+    with pytest.raises(ValueError, match="Need to add_node `ghost` first"):
+        builder.add_conditional_edges("ghost", lambda _: END)
+
+
+def test_add_conditional_edges_allows_start_sentinel() -> None:
+    """START is the entry sentinel; it is never in self.nodes but is a valid
+    source for a conditional edge (entry routing).
+
+    Regression guard for the new `source != START` exclusion — START is a
+    string sentinel and would otherwise be rejected by the new validation.
+    """
+
+    def route(_: dict) -> str:
+        return "a"
+
+    builder = StateGraph(dict)
+    builder.add_node("a", _passthrough)
+    builder.add_conditional_edges(START, route, path_map={"a": "a"})
+    builder.add_edge("a", END)
+    graph = builder.compile()
+    assert graph.invoke({}) == {}
+
+
+def test_add_conditional_edges_accepts_known_source() -> None:
+    """Regression guard: the new eager validation must not break the happy
+    path for graphs that wire the source node first then add the edge.
+    """
+    builder = StateGraph(dict)
+    builder.add_node("a", _passthrough)
+    builder.add_node("b", _passthrough)
+    builder.add_conditional_edges("a", lambda _: "b", path_map={"b": "b"})
+    builder.add_edge(START, "a")
+    builder.add_edge("a", END)
+    builder.add_edge("b", END)
+    graph = builder.compile()
+    assert graph.invoke({}) == {}
