@@ -122,6 +122,16 @@ class LastValueAfterFinish(
     def update(self, values: Sequence[Value | Any]) -> bool:
         if len(values) == 0:
             return False
+        if len(values) != 1:
+            # Mirror LastValue.update: silently taking values[-1] when the
+            # caller passed a batch is a silent data-loss bug. The same
+            # error_code, message shape, and Annotated-key escape hatch
+            # as LastValue.update.
+            msg = create_error_message(
+                message=f"At key '{self.key}': Can receive only one value per step. Use an Annotated key to handle multiple values.",
+                error_code=ErrorCode.INVALID_CONCURRENT_GRAPH_UPDATE,
+            )
+            raise InvalidUpdateError(msg)
 
         self.finished = False
         self.value = values[-1]
