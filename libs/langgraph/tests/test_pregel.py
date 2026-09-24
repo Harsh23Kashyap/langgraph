@@ -108,10 +108,14 @@ def test_graph_validation() -> None:
     graph = StateGraph(State)
     graph.add_node("start", lambda x: x)
     graph.add_edge("__start__", "start")
-    graph.add_edge("unknown", "start")
+    # The bug: add_edge with an unknown source silently succeeded pre-fix,
+    # with the error only surfacing at compile() time. Post-fix (this PR),
+    # add_edge mirrors the multi-start branch (state.py:969-983) and
+    # validates eagerly with the same error message: "Need to add_node `X` first".
+    with pytest.raises(ValueError, match="Need to add_node `unknown` first"):
+        graph.add_edge("unknown", "start")
     graph.add_edge("start", "__end__")
-    with pytest.raises(ValueError, match="Found edge starting at unknown node "):
-        graph.compile()
+    graph.compile()
 
     def bad_reducer(a): ...
 
