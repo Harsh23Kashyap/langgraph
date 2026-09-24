@@ -2939,3 +2939,80 @@ async def test_pregel_user_raised_cancellederror_fails_run():
     with pytest.raises(NodeCancelledError) as excinfo:
         await graph.ainvoke({"vals": []})
     assert excinfo.value.node == "boom"
+
+
+def test_timeout_policy_direct_construction_validation() -> None:
+    """TimeoutPolicy(...) must validate at construction, not only via coerce().
+
+    Regression: pre-fix, the @dataclass-generated __init__ did not
+    validate run_timeout / idle_timeout / refresh_on. The validation
+    only fired in TimeoutPolicy.coerce() (called by
+    coerce_timeout_policy), which is invoked at the public-API
+    boundary (Pregel.__init__, StateGraph.add_node timeout=,
+    @task(timeout=...)).
+
+    Callers that constructed TimeoutPolicy directly (e.g.,
+    `timeout=TimeoutPolicy(run_timeout=-1)`) bypassed the validation
+    and the bad value flowed through to the asyncio cancellation
+    logic with undefined behavior. The 16 existing direct constructions
+    in this test file (test_retry.py:818, 883, 1033, 1055, 1232, 1238,
+    1248, 1271, 1294, 1317, 1349, 1373, 1398, ...) all use positive
+    values, so the validation is safe to add.
+
+    The validation is added as a __post_init__ method, mirroring the
+    RetryPolicy.__post_init__ and CachePolicy.__post_init__ patterns
+    from PR #24 and PR #30. TimeoutPolicy is @dataclass(frozen=True),
+    so __post_init__ cannot reassign fields — it only validates.
+
+    The error messages match the existing coerce() validation exactly
+    so callers see the same error regardless of construction path.
+    """
+    # Sanity check: defaults work.
+    policy = TimeoutPolicy()
+    assert policy.run_timeout is None
+    assert policy.idle_timeout is None
+    assert policy.refresh_on == "auto"
+
+    # Sanity check: positive values work.
+    policy = TimeoutPolicy(run_timeout=1.0, idle_timeout=2.0)
+    assert policy.run_timeout == 1.0
+    assert policy.idle_timeout == 2.0
+
+    # Sanity check: timedelta values work.
+    policy = TimeoutPolicy(run_timeout=timedelta(milliseconds=500))
+    assert policy.run_timeout == timedelta(milliseconds=500)
+
+    # Sanity check: refresh_on="heartbeat" works.
+    policy = TimeoutPolicy(idle_timeout=0.05, refresh_on="heartbeat")
+    assert policy.refresh_on == "heartbeat"
+
+    # The bug: run_timeout=-1 silently accepted.
+    with pytest.raises(ValueError, match="run_timeout must be greater than 0"):
+        TimeoutPolicy(run_timeout=-1)
+
+    # The bug: run_timeout=0 silently accepted.
+    with pytest.raises(ValueError, match="run_timeout must be greater than 0"):
+        TimeoutPolicy(run_timeout=0)
+
+    # The bug: run_timeout=timedelta(0) silently accepted.
+    with pytest.raises(ValueError, match="run_timeout must be greater than 0"):
+        TimeoutPolicy(run_timeout=timedelta(0))
+
+    # The bug: run_timeout=timedelta(seconds=-1) silently accepted.
+    with pytest.raises(ValueError, match="run_timeout must be greater than 0"):
+        TimeoutPolicy(run_timeout=timedelta(seconds=-1))
+
+    # The bug: idle_timeout=0 silently accepted.
+    with pytest.raises(ValueError, match="idle_timeout must be greater than 0"):
+        TimeoutPolicy(idle_timeout=0)
+
+    # The bug: idle_timeout=-1 silently accepted.
+    with pytest.raises(ValueError, match="idle_timeout must be greater than 0"):
+        TimeoutPolicy(idle_timeout=-1)
+
+    # The bug: invalid refresh_on silently accepted.
+    with pytest.raises(ValueError, match="refresh_on must be 'auto' or 'heartbeat'"):
+        TimeoutPolicy(refresh_on="never")
+
+    with pytest.raises(ValueError, match="refresh_on must be 'auto' or 'heartbeat'"):
+        TimeoutPolicy(refresh_on="")
