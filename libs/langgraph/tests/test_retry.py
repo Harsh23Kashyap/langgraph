@@ -230,6 +230,14 @@ def test_should_retry_default_retry_on():
     req_error_no_resp.response = None
     assert _should_retry_on(policy, req_error_no_resp) is True
 
+    # Should also retry on httpx.HTTPStatusError with no response
+    # (mirrors the requests.HTTPError branch — manually-raised instances may
+    # not have a `response` attached).
+    http_error_no_resp = httpx.HTTPStatusError(
+        "connection error", request=Mock(), response=None
+    )
+    assert _should_retry_on(policy, http_error_no_resp) is True
+
     # NodeTimeoutError should be retryable by default
     assert (
         _should_retry_on(
@@ -244,6 +252,62 @@ def test_should_retry_default_retry_on():
         pass
 
     assert _should_retry_on(policy, CustomException("custom error")) is True
+
+
+def test_default_retry_on_handles_missing_httpx_and_requests() -> None:
+    """`default_retry_on` must not crash if httpx or requests is not installed.
+
+    Pre-fix: the function unconditionally did `import httpx; import requests`
+    on every call. A user who had neither library installed would see an
+    `ImportError` from the retry layer, masking the original error and
+    making it look like the retry logic was broken. The fix wraps each
+    import in `try/except ImportError` and short-circuits the corresponding
+    `isinstance` branch.
+    """
+    # Save and remove the cached imports inside the module so the
+    # function body re-runs the import statements. The function has no
+    # module-level `httpx` / `requests` symbols of its own, so we just
+    # have to ensure the names are not in `sys.modules` for the
+    # duration of the test.
+    import sys
+
+    from langgraph._internal import _retry
+
+    original_modules = {
+        name: sys.modules.pop(name)
+        for name in ("httpx", "requests")
+        if name in sys.modules
+    }
+    # Make sure the test sees them as missing.
+    sys.modules.pop("httpx", None)
+    sys.modules.pop("requests", None)
+    try:
+        # Reload the module so any cached `import httpx` / `import requests`
+        # in its globals is cleared.
+        import importlib
+
+        reloaded = importlib.reload(_retry)
+        try:
+            # Common exception types should still work without httpx/requests.
+            assert reloaded.default_retry_on(ConnectionError("refused")) is True
+            assert reloaded.default_retry_on(ValueError("bad value")) is False
+            assert reloaded.default_retry_on(TypeError("bad type")) is False
+
+            # A custom exception class is not in the "should not retry"
+            # list (which only covers builtins), so the function falls
+            # through to the default `return True`.
+            class _CustomError(Exception):
+                pass
+
+            assert reloaded.default_retry_on(_CustomError()) is True
+        finally:
+            importlib.reload(_retry)
+    finally:
+        # Restore the original sys.modules state so other tests are unaffected.
+        for name in ("httpx", "requests"):
+            sys.modules.pop(name, None)
+        for name, mod in original_modules.items():
+            sys.modules[name] = mod
 
 
 def test_graph_with_single_retry_policy():
