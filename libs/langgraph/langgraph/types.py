@@ -480,6 +480,24 @@ class TimeoutPolicy:
     `"heartbeat"` refreshes only on explicit `runtime.heartbeat()` calls.
     """
 
+    def __post_init__(self) -> None:
+        # Mirror the validation in coerce()/coerce_timeout_policy() so
+        # direct TimeoutPolicy(...) construction catches the same bad
+        # inputs as the coerce() path. Without this, users who pass a
+        # TimeoutPolicy directly (rather than letting coerce_timeout_policy
+        # normalize a scalar) would bypass the positivity check.
+        if self.refresh_on not in ("auto", "heartbeat"):
+            raise ValueError("refresh_on must be 'auto' or 'heartbeat'")
+        for field_name in ("run_timeout", "idle_timeout"):
+            value = getattr(self, field_name)
+            if value is None:
+                continue
+            seconds = (
+                value.total_seconds() if isinstance(value, timedelta) else float(value)
+            )
+            if seconds <= 0:
+                raise ValueError(f"{field_name} must be greater than 0")
+
     @classmethod
     def coerce(
         cls, value: float | timedelta | TimeoutPolicy | None
