@@ -953,6 +953,10 @@ class StateGraph(Generic[StateT, ContextT, InputT, OutputT]):
                 raise ValueError("END cannot be a start node")
             if end_key == START:
                 raise ValueError("START cannot be an end node")
+            if start_key != START and start_key not in self.nodes:
+                raise ValueError(f"Need to add_node `{start_key}` first")
+            if end_key != END and end_key not in self.nodes:
+                raise ValueError(f"Need to add_node `{end_key}` first")
 
             # run this validation only for non-StateGraph graphs
             if not hasattr(self, "channels") and start_key in set(

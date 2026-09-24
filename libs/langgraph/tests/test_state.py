@@ -12,6 +12,7 @@ from typing_extensions import NotRequired, Required, TypedDict
 
 from langgraph.channels.binop import BinaryOperatorAggregate
 from langgraph.channels.ephemeral_value import EphemeralValue
+from langgraph.graph import END, START
 from langgraph.graph.state import (
     StateGraph,
     _get_node_name,
@@ -371,3 +372,78 @@ def test_is_field_channel() -> None:
     # No channel cases
     assert _is_field_channel(int) is None
     assert _is_field_channel(Annotated[int, "just_metadata"]) is None
+
+
+def test_add_edge_single_start_eager_validation() -> None:
+    """Single-start add_edge must eagerly validate start_key and end_key.
+
+    Regression: pre-fix, single-start `add_edge(start, end)` (where start
+    is a single string) silently accepted unknown node names. The error
+    only surfaced at compile() time from validate_graph (state.py:1116-
+    1143), with the message "Found edge starting at unknown node 'X'".
+
+    The multi-start branch (state.py:969-983) ALREADY validated eagerly
+    with the message "Need to add_node `X` first". This test mirrors that
+    asymmetry at the single-start branch (state.py:951-967).
+
+    The fix:
+      if start_key not in self.nodes:
+          raise ValueError(f"Need to add_node `{start_key}` first")
+      if end_key != END and end_key not in self.nodes:
+          raise ValueError(f"Need to add_node `{end_key}` first")
+
+    Matches the multi-start branch byte-for-byte, so callers see the
+    same error regardless of which form they use.
+    """
+
+    class State(TypedDict):
+        x: int
+
+    # Sanity check: known start + known end works.
+    graph = StateGraph(State)
+    graph.add_node("a", lambda s: s)
+    graph.add_edge(START, "a")
+    graph.add_edge("a", END)
+    graph.compile()  # no error
+
+    # Sanity check: START and END sentinels work.
+    graph = StateGraph(State)
+    graph.add_node("a", lambda s: s)
+    graph.add_edge(START, "a")
+    graph.add_edge("a", END)
+
+    # Sanity check: END is not a valid start.
+    graph = StateGraph(State)
+    graph.add_node("a", lambda s: s)
+    with pytest.raises(ValueError, match="END cannot be a start node"):
+        graph.add_edge(END, "a")
+
+    # Sanity check: START is not a valid end.
+    graph = StateGraph(State)
+    graph.add_node("a", lambda s: s)
+    with pytest.raises(ValueError, match="START cannot be an end node"):
+        graph.add_edge("a", START)
+
+    # The bug: unknown source silently accepted pre-fix, now raises eagerly.
+    graph = StateGraph(State)
+    graph.add_node("a", lambda s: s)
+    with pytest.raises(ValueError, match="Need to add_node `unknown` first"):
+        graph.add_edge("unknown", "a")
+
+    # The bug: unknown target silently accepted pre-fix (unless it's END),
+    # now raises eagerly.
+    graph = StateGraph(State)
+    graph.add_node("a", lambda s: s)
+    with pytest.raises(ValueError, match="Need to add_node `missing` first"):
+        graph.add_edge("a", "missing")
+
+    # END is a valid target (it's a built-in sentinel, not a user node).
+    graph = StateGraph(State)
+    graph.add_node("a", lambda s: s)
+    graph.add_edge("a", END)  # no error
+
+    # Both unknown is atomic (raises on the first invalid).
+    graph = StateGraph(State)
+    graph.add_node("a", lambda s: s)
+    with pytest.raises(ValueError, match="Need to add_node"):
+        graph.add_edge("missing_start", "missing_end")
