@@ -18,6 +18,7 @@ from langgraph.graph.state import (
     _is_field_channel,
     _warn_invalid_state_schema,
 )
+from langgraph.types import Send
 
 
 class State(BaseModel):
@@ -371,3 +372,58 @@ def test_is_field_channel() -> None:
     # No channel cases
     assert _is_field_channel(int) is None
     assert _is_field_channel(Annotated[int, "just_metadata"]) is None
+
+
+def test_send_empty_node_raises() -> None:
+    """`Send("", arg)` must raise at construction.
+
+    Regression: pre-fix, `Send("", arg)` silently constructed a broken
+    primitive. The graph runtime later failed to find a node with the
+    empty name, surfacing as an opaque KeyError inside the pregel loop
+    (pregel/_algo.py:1460, where `Send(node=packet.node, ...)` is built
+    and dispatched).
+
+    The eager check mirrors PR #21 (`add_conditional_edges` source
+    validation) and PR #32 (single-start `add_edge` source validation):
+    fail fast at the constructor the caller controls, with a message
+    that names the field and the constraint.
+    """
+    with pytest.raises(ValueError, match="`node` must be a non-empty string"):
+        Send("", {"foo": 1})
+
+
+def test_send_non_string_node_raises() -> None:
+    """A non-string, non-truthy `node` (e.g. `None`) must also raise.
+
+    `bool(node)` is True for any non-empty container but `node` is typed
+    `str`; passing `None` is the closest "user mistake" to "empty string"
+    and should also fail at construction. This locks the validation to
+    the type, not just the value.
+    """
+    with pytest.raises(ValueError, match="`node` must be a non-empty string"):
+        Send(None, {"foo": 1})  # type: ignore[arg-type]
+
+
+def test_send_accepts_named_node() -> None:
+    """A non-empty string `node` constructs without error.
+
+    Sanity check that the validation does not over-reach: the simplest
+    valid use case still works.
+    """
+    s = Send("node_name", {"foo": 1})
+    assert s.node == "node_name"
+    assert s.arg == {"foo": 1}
+    assert s.timeout is None
+
+
+def test_send_accepts_named_node_with_timeout() -> None:
+    """A non-empty string `node` with an explicit timeout constructs cleanly.
+
+    Sanity check that the validation does not interfere with the existing
+    `TimeoutPolicy.coerce(timeout)` call that runs after the new check.
+    """
+    s = Send("node_name", {"foo": 1}, timeout=5.0)
+    assert s.node == "node_name"
+    assert s.arg == {"foo": 1}
+    assert s.timeout is not None
+    assert s.timeout.run_timeout == 5.0

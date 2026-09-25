@@ -771,6 +771,8 @@ class Send:
             timeout: Optional timeout policy for this specific pushed task. A
                 number or `timedelta` is treated as a hard `run_timeout`.
         """
+        if not node:
+            raise ValueError("`node` must be a non-empty string")
         self.node = node
         self.arg = arg
         self.timeout = TimeoutPolicy.coerce(timeout)
