@@ -14,6 +14,10 @@ from langgraph._internal._typing import MISSING
 from langgraph.channels.binop import BinaryOperatorAggregate, _get_overwrite
 from langgraph.channels.delta import DeltaChannel
 from langgraph.channels.last_value import LastValue
+from langgraph.channels.named_barrier_value import (
+    NamedBarrierValue,
+    NamedBarrierValueAfterFinish,
+)
 from langgraph.channels.topic import Topic
 from langgraph.channels.untracked_value import UntrackedValue
 from langgraph.errors import EmptyChannelError, InvalidUpdateError
@@ -796,3 +800,53 @@ def test_delta_channel_from_checkpoint_seed_none_is_distinct_from_sentinel() -> 
     ch = spec.from_checkpoint(None)
     ch.replay_writes([("t0", "x", "after")])
     assert ch.get() == "after"
+
+
+# ---------------------------------------------------------------------------
+# NamedBarrierValue / NamedBarrierValueAfterFinish — eager init validation
+# ---------------------------------------------------------------------------
+
+
+def test_named_barrier_value_init_rejects_empty_names() -> None:
+    """`NamedBarrierValue(typ, names=set())` must raise at construction.
+
+    Regression: pre-fix, `NamedBarrierValue(str, set())` silently constructed
+    a permanently-broken channel: `is_available()` returned True (both sets
+    were empty), `get()` returned None, but every `update()` raised
+    `InvalidUpdateError("Value X not in set()")` because no value can be a
+    member of the empty set. The user was led to believe the channel was
+    ready until the first write.
+
+    The eager check catches this at construction time, before any node is
+    built against the channel.
+    """
+    with pytest.raises(ValueError, match="`names` must be a non-empty set"):
+        NamedBarrierValue(str, set())
+
+
+def test_named_barrier_value_after_finish_init_rejects_empty_names() -> None:
+    """`NamedBarrierValueAfterFinish(typ, names=set())` must raise at construction.
+
+    Same bug, sibling class. The `AfterFinish` variant has identical
+    semantics for the names-set barrier logic, so the validation mirrors
+    `NamedBarrierValue`.
+    """
+    with pytest.raises(ValueError, match="`names` must be a non-empty set"):
+        NamedBarrierValueAfterFinish(str, set())
+
+
+def test_named_barrier_value_init_accepts_singleton() -> None:
+    """A non-empty single-name set constructs without error."""
+    ch = NamedBarrierValue(str, {"a"})
+    assert ch.names == {"a"}
+    assert ch.seen == set()
+    assert not ch.is_available()
+
+
+def test_named_barrier_value_after_finish_init_accepts_singleton() -> None:
+    """A non-empty single-name set constructs without error."""
+    ch = NamedBarrierValueAfterFinish(str, {"a"})
+    assert ch.names == {"a"}
+    assert ch.seen == set()
+    assert not ch.finished
+    assert not ch.is_available()
