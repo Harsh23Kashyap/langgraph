@@ -12,6 +12,7 @@ from typing_extensions import NotRequired, Required, TypedDict
 
 from langgraph.channels.binop import BinaryOperatorAggregate
 from langgraph.channels.ephemeral_value import EphemeralValue
+from langgraph.func import task
 from langgraph.graph.state import (
     StateGraph,
     _get_node_name,
@@ -371,3 +372,51 @@ def test_is_field_channel() -> None:
     # No channel cases
     assert _is_field_channel(int) is None
     assert _is_field_channel(Annotated[int, "just_metadata"]) is None
+
+
+def test_task_decorator_empty_name_raises() -> None:
+    """`@task(name="")` must raise at decoration time.
+
+    Regression: pre-fix, `@task(name="")` silently assigned an empty
+    string to `func.__name__`. The cache layer's `or "__dynamic__"`
+    fallback handled the empty string gracefully (`identifier(self.func)
+    or "__dynamic__"`), but the user gets no diagnostic that their
+    `name=""` was a mistake. The eager check at construction time
+    catches the typo at the call site, in the same shape as PR #36
+    (`StateGraph.add_node` empty-name validation).
+
+    The pre-fix bug:
+        @task(name="")
+        async def my_task(x): return x
+        # silently constructs; func.__name__ == ""; cache namespace
+        # silently falls back to "__dynamic__"
+    """
+    with pytest.raises(ValueError, match="`name` must be a non-empty string"):
+
+        @task(name="")
+        async def _t(x):  # pragma: no cover - never reached
+            return x
+
+
+def test_task_decorator_valid_name_accepted() -> None:
+    """A non-empty `name` constructs cleanly."""
+
+    @task(name="my_task")
+    async def t(x):
+        return x
+
+    assert t.func.__name__ == "my_task"
+
+
+def test_task_decorator_default_name_accepted() -> None:
+    """`@task()` (no name) is preserved as the default — `name=None`.
+
+    Sanity check that the validation does not over-reach.
+    """
+
+    @task()
+    async def t(x):
+        return x
+
+    # func.__name__ retains the original function name
+    assert t.func.__name__ == "t"
