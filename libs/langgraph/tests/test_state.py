@@ -18,6 +18,7 @@ from langgraph.graph.state import (
     _is_field_channel,
     _warn_invalid_state_schema,
 )
+from langgraph.types import Command, Send
 
 
 class State(BaseModel):
@@ -371,3 +372,72 @@ def test_is_field_channel() -> None:
     # No channel cases
     assert _is_field_channel(int) is None
     assert _is_field_channel(Annotated[int, "just_metadata"]) is None
+
+
+def test_command_goto_empty_string_raises() -> None:
+    """`Command(goto="")` must raise at construction.
+
+    Regression: pre-fix, `Command(goto="")` silently accepted an empty
+    string as a goto target. The graph runtime later failed to find a
+    node with the empty name, surfacing as an opaque KeyError inside
+    the pregel loop (mirrors PR #34's `Send("", ...)` bug, on the
+    sibling `Command` primitive).
+
+    The eager check on `Send` (PR #34) catches `Send("", arg)` but not
+    `Command(goto="")` because `goto` is typed `Send | Sequence[Send |
+    N] | N` and `N` is bound to `Hashable` — strings are valid. This
+    PR closes that surface.
+    """
+    with pytest.raises(ValueError, match="`goto` must be a non-empty string"):
+        Command(goto="")
+
+
+def test_command_goto_empty_string_in_sequence_raises() -> None:
+    """`Command(goto=("", "a"))` must raise at construction.
+
+    Sibling coverage for the empty-string-inside-sequence case. The
+    sequence form lets the user route to multiple nodes; one empty
+    string in the list should fail the construction, not later in the
+    pregel loop.
+    """
+    with pytest.raises(
+        ValueError, match="`goto` must not contain empty-string node names"
+    ):
+        Command(goto=("", "a"))
+
+
+def test_command_goto_accepts_single_named_string() -> None:
+    """A single non-empty string `goto` constructs cleanly."""
+    c = Command(goto="node_a")
+    assert c.goto == "node_a"
+
+
+def test_command_goto_accepts_sequence_of_named_strings() -> None:
+    """A sequence of non-empty strings constructs cleanly."""
+    c = Command(goto=("node_a", "node_b"))
+    assert c.goto == ("node_a", "node_b")
+
+
+def test_command_goto_default_empty_tuple_is_fine() -> None:
+    """The default `goto=()` ("no goto") remains valid.
+
+    The empty tuple is the documented "no goto" sentinel — it must NOT
+    raise. Only string and sequence-of-string cases are validated;
+    Send elements inside a sequence are trusted (PR #34 already
+    validates `Send`).
+    """
+    c = Command()
+    assert c.goto == ()
+
+
+def test_command_goto_trusts_send_validation() -> None:
+    """`Command(goto=Send("a", arg))` does not double-validate `Send.node`.
+
+    PR #34 already validates `Send.node` at construction. This PR is
+    scoped to the `Command` surface; `Send` elements inside a
+    `Command.goto` sequence are trusted because their own `__init__`
+    already raised for empty nodes.
+    """
+    s = Send("node_a", {"foo": 1})
+    c = Command(goto=s)
+    assert c.goto is s
