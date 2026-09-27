@@ -18,6 +18,7 @@ from langgraph.graph.state import (
     _is_field_channel,
     _warn_invalid_state_schema,
 )
+from langgraph.types import CachePolicy
 
 
 class State(BaseModel):
@@ -371,3 +372,60 @@ def test_is_field_channel() -> None:
     # No channel cases
     assert _is_field_channel(int) is None
     assert _is_field_channel(Annotated[int, "just_metadata"]) is None
+
+
+def test_cache_policy_non_callable_key_func_raises() -> None:
+    """`CachePolicy(key_func="not_callable")` must raise at construction.
+
+    Regression: pre-fix, `CachePolicy(key_func="some_string")` silently
+    constructed a broken dataclass. `key_func` is typed
+    `Callable[..., str | bytes]` but Python's dataclass machinery does
+    not validate callable-ness at construction. The cache later failed
+    at the first invocation with `TypeError: 'str' object is not
+    callable`, far from the call site the user controls.
+
+    The eager `__post_init__` check catches the mistake at
+    construction time, in the same shape as PR #24 (`RetryPolicy`
+    numeric range), PR #30 (`CachePolicy.ttl` non-negative), and
+    PR #31 (`TimeoutPolicy` numeric range). This PR extends the
+    `CachePolicy` family with a 4th validation: key_func is callable.
+    """
+    with pytest.raises(ValueError, match="`key_func` must be a callable or None"):
+        CachePolicy(key_func="not_callable")
+
+
+def test_cache_policy_int_key_func_raises() -> None:
+    """Sibling coverage for non-callable-but-truthy `key_func` (e.g. an
+    int). Locks the validation to the type, not the truthiness of the
+    value.
+    """
+    with pytest.raises(ValueError, match="`key_func` must be a callable or None"):
+        CachePolicy(key_func=42)
+
+
+def test_cache_policy_callable_key_func_accepted() -> None:
+    """A callable `key_func` constructs cleanly."""
+    cp = CachePolicy(key_func=lambda x: str(x))
+    assert cp.key_func is not None
+    assert cp.key_func("foo") == "foo"
+
+
+def test_cache_policy_none_key_func_accepted() -> None:
+    """`key_func=None` is valid and triggers the default in the cache layer.
+
+    Sanity check that the validation does not over-reach.
+    """
+    cp = CachePolicy(key_func=None)
+    assert cp.key_func is None
+
+
+def test_cache_policy_default_key_func_accepted() -> None:
+    """The default `key_func=default_cache_key` constructs cleanly.
+
+    The dataclass default is `default_cache_key` (a real callable),
+    not `None`. The `key_func is not None` guard in `__post_init__`
+    correctly skips the validation when the default is used.
+    """
+    cp = CachePolicy()
+    assert cp.key_func is not None
+    assert callable(cp.key_func)
