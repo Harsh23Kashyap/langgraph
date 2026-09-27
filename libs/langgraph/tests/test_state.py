@@ -371,3 +371,48 @@ def test_is_field_channel() -> None:
     # No channel cases
     assert _is_field_channel(int) is None
     assert _is_field_channel(Annotated[int, "just_metadata"]) is None
+
+
+def test_add_node_empty_string_name_raises() -> None:
+    """`StateGraph.add_node("", action)` must raise at construction.
+
+    Regression: pre-fix, `StateGraph.add_node("", some_callable)` silently
+    accepted an empty-string node name. The existing checks at
+    state.py:802-811 verify non-duplication, non-reserved-status, and
+    absence of NS_SEP/NS_END characters, but they do NOT verify that
+    `node` is non-empty. The empty string satisfies all of them and was
+    happily added to `self.nodes` (verified by `list(self.nodes.keys())`
+    returning `['']`).
+
+    The downstream failure mode is opaque: edges referencing the empty
+    name pass PR #32's source-validation check (because the empty name
+    IS in `self.nodes`), but the runtime later fails to dispatch the
+    task because no real node function is bound to the empty key.
+
+    The eager check fails fast at the call site, in the same shape as
+    PR #21 (`add_conditional_edges` source validation), PR #32
+    (single-start `add_edge` source validation), PR #34 (`Send.__init__`
+    node validation), and PR #35 (`Command.__post_init__` goto
+    validation). This PR closes the only remaining route-target surface
+    in the StateGraph family.
+    """
+
+    class _State(TypedDict):
+        x: int
+
+    builder = StateGraph(_State)
+    with pytest.raises(ValueError, match="Node name must be a non-empty string"):
+        builder.add_node("", lambda state: {"x": state["x"] + 1})
+
+
+def test_add_node_valid_name_accepted() -> None:
+    """Sanity check that the validation does not over-reach; a valid
+    named node must still construct cleanly.
+    """
+
+    class _State(TypedDict):
+        x: int
+
+    builder = StateGraph(_State)
+    builder.add_node("node_a", lambda state: {"x": state["x"] + 1})
+    assert "node_a" in builder.nodes
