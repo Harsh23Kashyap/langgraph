@@ -799,6 +799,8 @@ class StateGraph(Generic[StateT, ContextT, InputT, OutputT]):
                 )
         if action is None:
             raise RuntimeError
+        if not node:
+            raise ValueError("Node name must be a non-empty string")
         if node in self.nodes:
             raise ValueError(f"Node `{node}` already present.")
         if node == END or node == START:
