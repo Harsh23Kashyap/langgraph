@@ -1486,6 +1486,15 @@ class Pregel(
         limit: int | None = None,
     ) -> Iterator[StateSnapshot]:
         """Get the history of the state of the graph."""
+        if limit is not None:
+            if isinstance(limit, bool):
+                # Reject booleans explicitly. `bool` is a subclass of
+                # `int` in Python (`True == 1`, `False == 0`), so a
+                # naive `limit < 1` check would let `True` slip
+                # through as "limit 1" without any diagnostic.
+                raise ValueError("`limit` must be an integer or None, not a bool")
+            if limit < 1:
+                raise ValueError("limit must be at least 1")
         config = ensure_config(config)
         checkpointer: BaseCheckpointSaver | None = config[CONF].get(
             CONFIG_KEY_CHECKPOINTER, self.checkpointer
@@ -1539,6 +1548,15 @@ class Pregel(
         limit: int | None = None,
     ) -> AsyncIterator[StateSnapshot]:
         """Asynchronously get the history of the state of the graph."""
+        if limit is not None:
+            if isinstance(limit, bool):
+                # Reject booleans explicitly. `bool` is a subclass of
+                # `int` in Python (`True == 1`, `False == 0`), so a
+                # naive `limit < 1` check would let `True` slip
+                # through as "limit 1" without any diagnostic.
+                raise ValueError("`limit` must be an integer or None, not a bool")
+            if limit < 1:
+                raise ValueError("limit must be at least 1")
         config = ensure_config(config)
         checkpointer: BaseCheckpointSaver | None = ensure_config(config)[CONF].get(
             CONFIG_KEY_CHECKPOINTER, self.checkpointer
