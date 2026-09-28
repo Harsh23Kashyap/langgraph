@@ -9666,3 +9666,178 @@ async def test_delta_channel_async_write_ordering() -> None:
 
     state = await graph.aget_state(config)
     assert len(state.values["messages"]) == 6  # 3 human + 3 AI
+
+
+async def test_get_state_history_limit_rejects_bool_true() -> None:
+    """`get_state_history(config, limit=True)` must raise `ValueError`.
+
+    Regression: pre-fix, `limit=True` slipped through the `limit < 1`
+    check because `bool` subclasses `int` in Python (`True == 1`).
+    A user passing `True` got a 1-entry history silently — same shape
+    of bug as PR #39 (`TimeoutPolicy.coerce(True)` slipped through
+    `_coerce_timeout_seconds`).
+
+    The eager `isinstance(limit, bool)` check catches the typo at
+    the call site, in the same shape as PR #39's bool guard and
+    the existing limit < 1 validation from PR #29.
+    """
+
+    class S(TypedDict):
+        x: int
+
+    b = StateGraph(S)
+    b.add_node("a", lambda s: {"x": s["x"] + 1})
+    b.add_edge(START, "a")
+    ck = InMemorySaver()
+    g = b.compile(checkpointer=ck)
+    config = {"configurable": {"thread_id": "t1"}}
+
+    with pytest.raises(ValueError, match=r"must be an integer or None, not a bool"):
+        list(g.get_state_history(config, limit=True))
+
+
+async def test_get_state_history_limit_rejects_bool_false() -> None:
+    """`get_state_history(config, limit=False)` must raise `ValueError`.
+
+    Sibling coverage. `False == 0`, so the existing `limit < 1`
+    check would catch `False` post-fix (it raises "limit must be at
+    least 1"); pre-fix, the new bool guard catches `False` first
+    with the clearer "not a bool" message.
+    """
+
+    class S(TypedDict):
+        x: int
+
+    b = StateGraph(S)
+    b.add_node("a", lambda s: {"x": s["x"] + 1})
+    b.add_edge(START, "a")
+    ck = InMemorySaver()
+    g = b.compile(checkpointer=ck)
+    config = {"configurable": {"thread_id": "t1"}}
+
+    with pytest.raises(ValueError, match=r"must be an integer or None, not a bool"):
+        list(g.get_state_history(config, limit=False))
+
+
+async def test_get_state_history_limit_rejects_zero() -> None:
+    """`limit=0` raises via the existing `limit < 1` check.
+
+    Sanity check that the bool guard does not regress the
+    pre-existing zero-rejection behavior.
+    """
+
+    class S(TypedDict):
+        x: int
+
+    b = StateGraph(S)
+    b.add_node("a", lambda s: {"x": s["x"] + 1})
+    b.add_edge(START, "a")
+    ck = InMemorySaver()
+    g = b.compile(checkpointer=ck)
+    config = {"configurable": {"thread_id": "t1"}}
+
+    with pytest.raises(ValueError, match=r"limit must be at least 1"):
+        list(g.get_state_history(config, limit=0))
+
+
+async def test_get_state_history_limit_rejects_negative() -> None:
+    """`limit=-1` raises via the existing `limit < 1` check.
+
+    Sibling coverage.
+    """
+
+    class S(TypedDict):
+        x: int
+
+    b = StateGraph(S)
+    b.add_node("a", lambda s: {"x": s["x"] + 1})
+    b.add_edge(START, "a")
+    ck = InMemorySaver()
+    g = b.compile(checkpointer=ck)
+    config = {"configurable": {"thread_id": "t1"}}
+
+    with pytest.raises(ValueError, match=r"limit must be at least 1"):
+        list(g.get_state_history(config, limit=-1))
+
+
+async def test_aget_state_history_limit_rejects_bool_true() -> None:
+    """Sibling async test."""
+
+    class S(TypedDict):
+        x: int
+
+    b = StateGraph(S)
+    b.add_node("a", lambda s: {"x": s["x"] + 1})
+    b.add_edge(START, "a")
+    ck = InMemorySaver()
+    g = b.compile(checkpointer=ck)
+    config = {"configurable": {"thread_id": "t1"}}
+
+    with pytest.raises(ValueError, match=r"must be an integer or None, not a bool"):
+        async for _ in g.aget_state_history(config, limit=True):
+            pass
+
+
+async def test_aget_state_history_limit_rejects_bool_false() -> None:
+    """Sibling async test."""
+
+    class S(TypedDict):
+        x: int
+
+    b = StateGraph(S)
+    b.add_node("a", lambda s: {"x": s["x"] + 1})
+    b.add_edge(START, "a")
+    ck = InMemorySaver()
+    g = b.compile(checkpointer=ck)
+    config = {"configurable": {"thread_id": "t1"}}
+
+    with pytest.raises(ValueError, match=r"must be an integer or None, not a bool"):
+        async for _ in g.aget_state_history(config, limit=False):
+            pass
+
+
+async def test_get_state_history_limit_accepts_none() -> None:
+    """Sanity check: `limit=None` constructs cleanly (no regression).
+
+    When no checkpointer is configured, the existing
+    `No checkpointer set` check still fires — locking the existing
+    error-precedence behavior. With a checkpointer configured,
+    `limit=None` returns the full history.
+    """
+
+    class S(TypedDict):
+        x: int
+
+    b = StateGraph(S)
+    b.add_node("a", lambda s: {"x": s["x"] + 1})
+    b.add_edge(START, "a")
+    ck = InMemorySaver()
+    g = b.compile(checkpointer=ck)
+    config = {"configurable": {"thread_id": "t1"}}
+
+    history = list(g.get_state_history(config, limit=None))
+    assert history == []  # no invocations yet, so empty history
+
+
+async def test_get_state_history_limit_validation_fires_before_no_checkpointer() -> (
+    None
+):
+    """The bool guard fires BEFORE the `No checkpointer set` check.
+
+    Regression: locks the validation-precedence behavior so a bad
+    `limit` raises immediately even if no checkpointer is configured.
+    A user passing `limit=True` should get the clear bool error,
+    not the "no checkpointer" error.
+    """
+
+    class S(TypedDict):
+        x: int
+
+    b = StateGraph(S)
+    b.add_node("a", lambda s: {"x": s["x"] + 1})
+    b.add_edge(START, "a")
+    g = b.compile(checkpointer=False)  # no checkpointer
+    config = {"configurable": {"thread_id": "t1"}}
+
+    with pytest.raises(ValueError, match=r"must be an integer or None, not a bool"):
+        list(g.get_state_history(config, limit=True))
