@@ -2,6 +2,7 @@ import inspect
 import operator
 import warnings
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import Annotated, Any, Union
 from typing import Annotated as Annotated2
 
@@ -18,6 +19,7 @@ from langgraph.graph.state import (
     _is_field_channel,
     _warn_invalid_state_schema,
 )
+from langgraph.types import TimeoutPolicy
 
 
 class State(BaseModel):
@@ -371,3 +373,69 @@ def test_is_field_channel() -> None:
     # No channel cases
     assert _is_field_channel(int) is None
     assert _is_field_channel(Annotated[int, "just_metadata"]) is None
+
+
+def test_coerce_timeout_seconds_rejects_bool_true() -> None:
+    """`TimeoutPolicy.coerce(True)` must raise a clear `ValueError`.
+
+    Regression: pre-fix, `_coerce_timeout_seconds(True, field=...)` silently
+    returned 1.0 because `bool` subclasses `int` in Python
+    (`True == 1`). A user passing `True` as a timeout got a 1-second
+    timeout with no diagnostic. The eager check in the helper catches
+    the typo at the call site.
+
+    This is the narrowest defensible scope of the bool-vs-int
+    problem flagged in HANDOFF — the user-facing surface is
+    `TimeoutPolicy.coerce()`, and the helper is the single chokepoint
+    that all three timeout-construction paths flow through:
+    `TimeoutPolicy.coerce(value)`, the `_coerce_timeout_policy`
+    wrapper, and the dataclass's `__init__`.
+    """
+    with pytest.raises(ValueError, match=r"must be a number, not a bool"):
+        TimeoutPolicy.coerce(True)
+
+
+def test_coerce_timeout_seconds_rejects_bool_false() -> None:
+    """`TimeoutPolicy.coerce(False)` must raise for symmetry.
+
+    `False == 0` in Python, so `coerce(False)` would already raise via
+    the `seconds <= 0` check post-fix; pre-fix, it raised the same way.
+    The new `isinstance(value, bool)` check catches `False` first with
+    the clearer "not a bool" message.
+    """
+    with pytest.raises(ValueError, match=r"must be a number, not a bool"):
+        TimeoutPolicy.coerce(False)
+
+
+def test_coerce_timeout_seconds_accepts_positive_float() -> None:
+    """A positive float constructs cleanly (no regression)."""
+
+    tp = TimeoutPolicy.coerce(5.0)
+    assert tp is not None
+    assert tp.run_timeout == 5.0
+
+
+def test_coerce_timeout_seconds_accepts_timedelta() -> None:
+    """A `timedelta` value constructs cleanly (no regression)."""
+
+    tp = TimeoutPolicy.coerce(timedelta(seconds=2))
+    assert tp is not None
+    assert tp.run_timeout == 2.0
+
+
+def test_coerce_timeout_seconds_accepts_none() -> None:
+    """`None` returns `None` (no regression)."""
+
+    assert TimeoutPolicy.coerce(None) is None
+
+
+def test_coerce_timeout_seconds_rejects_zero() -> None:
+    """`0` raises via the existing `seconds <= 0` check (no regression)."""
+    with pytest.raises(ValueError, match=r"must be greater than 0"):
+        TimeoutPolicy.coerce(0)
+
+
+def test_coerce_timeout_seconds_rejects_negative() -> None:
+    """`-1.0` raises via the existing `seconds <= 0` check (no regression)."""
+    with pytest.raises(ValueError, match=r"must be greater than 0"):
+        TimeoutPolicy.coerce(-1.0)
