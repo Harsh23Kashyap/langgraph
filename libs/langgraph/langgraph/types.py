@@ -528,6 +528,16 @@ class CachePolicy(Generic[KeyFuncT]):
     ttl: int | None = None
     """Time to live for the cache entry in seconds. If `None`, the entry never expires."""
 
+    def __post_init__(self) -> None:
+        if isinstance(self.ttl, bool):
+            # Reject booleans explicitly. `bool` is a subclass of `int`
+            # in Python (`True == 1`, `False == 0`), so a naive
+            # `ttl < 1` check would let `True` slip through as a
+            # "1-second TTL" without any diagnostic.
+            raise ValueError("`ttl` must be an integer or None, not a bool")
+        if self.ttl is not None and self.ttl < 1:
+            raise ValueError("ttl must be at least 1")
+
 
 @dataclass(**_DC_KWARGS)
 class TracePolicy:
