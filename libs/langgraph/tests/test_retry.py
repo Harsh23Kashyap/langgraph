@@ -796,7 +796,7 @@ async def test_arun_with_retry_timeout_retries_when_retry_on_timeout():
 
     policy = RetryPolicy(
         max_attempts=3,
-        initial_interval=0.0,
+        initial_interval=0.01,
         jitter=False,
         retry_on=NodeTimeoutError,
     )
@@ -906,7 +906,7 @@ async def test_arun_with_retry_does_not_swallow_proc_asyncio_timeout():
     # would be retried, and `calls` would be 2.
     policy = RetryPolicy(
         max_attempts=2,
-        initial_interval=0.0,
+        initial_interval=0.01,
         jitter=False,
         retry_on=NodeTimeoutError,
     )
@@ -1111,7 +1111,7 @@ async def test_arun_with_retry_timeout_discards_stale_executor_writes():
 
     policy = RetryPolicy(
         max_attempts=2,
-        initial_interval=0.0,
+        initial_interval=0.01,
         jitter=False,
         retry_on=NodeTimeoutError,
     )
@@ -1495,7 +1495,7 @@ async def test_state_graph_add_node_timeout_composes_with_retry():
         timeout=TimeoutPolicy(idle_timeout=0.3),
         retry_policy=RetryPolicy(
             max_attempts=3,
-            initial_interval=0.0,
+            initial_interval=0.01,
             jitter=False,
             retry_on=NodeTimeoutError,
         ),
@@ -1666,7 +1666,7 @@ async def test_arun_with_retry_timeout_observer_tracks_attempts():
 
     policy = RetryPolicy(
         max_attempts=2,
-        initial_interval=0.0,
+        initial_interval=0.01,
         jitter=False,
         retry_on=NodeTimeoutError,
     )
@@ -1931,7 +1931,7 @@ async def test_arun_with_retry_observer_emits_finish_before_final_raise_on_exhau
 
     policy = RetryPolicy(
         max_attempts=2,
-        initial_interval=0.0,
+        initial_interval=0.01,
         jitter=False,
         retry_on=NodeTimeoutError,
     )
@@ -2939,3 +2939,108 @@ async def test_pregel_user_raised_cancellederror_fails_run():
     with pytest.raises(NodeCancelledError) as excinfo:
         await graph.ainvoke({"vals": []})
     assert excinfo.value.node == "boom"
+
+
+def test_retry_policy_rejects_bool_initial_interval():
+    """`RetryPolicy(initial_interval=True)` must raise `ValueError`.
+
+    Regression: pre-fix, `initial_interval=True` silently passed
+    because `bool` subclasses `float` (`True == 1.0`). A user
+    passing `True` got a 1-second retry interval with no diagnostic
+    — same shape of bug as PR #39 (`TimeoutPolicy.coerce(True)`).
+    """
+    with pytest.raises(
+        ValueError, match=r"`initial_interval` must be a number, not a bool"
+    ):
+        RetryPolicy(initial_interval=True)
+
+
+def test_retry_policy_rejects_bool_backoff_factor():
+    """`RetryPolicy(backoff_factor=True)` must raise `ValueError`.
+
+    Sibling coverage for the `backoff_factor` field.
+    """
+    with pytest.raises(
+        ValueError, match=r"`backoff_factor` must be a number, not a bool"
+    ):
+        RetryPolicy(backoff_factor=True)
+
+
+def test_retry_policy_rejects_bool_max_interval():
+    """`RetryPolicy(max_interval=True)` must raise `ValueError`.
+
+    Sibling coverage for the `max_interval` field.
+    """
+    with pytest.raises(
+        ValueError, match=r"`max_interval` must be a number, not a bool"
+    ):
+        RetryPolicy(max_interval=True)
+
+
+def test_retry_policy_rejects_bool_max_attempts():
+    """`RetryPolicy(max_attempts=True)` must raise `ValueError`.
+
+    Regression: pre-fix, `max_attempts=True` silently passed because
+    `True == 1` slips through the `< 1` check. A user passing `True`
+    got a single-attempt policy with no diagnostic — same shape of
+    bug as PR #39 and PR #40.
+    """
+    with pytest.raises(
+        ValueError,
+        match=r"`max_attempts` must be a positive integer, not a bool",
+    ):
+        RetryPolicy(max_attempts=True)
+
+
+def test_retry_policy_rejects_negative_initial_interval():
+    """`RetryPolicy(initial_interval=-1)` must raise `ValueError`.
+
+    A negative initial interval means "retry before the first attempt
+    completes" — nonsensical. Pre-fix, the NamedTuple silently accepted.
+    """
+    with pytest.raises(ValueError, match=r"initial_interval must be > 0"):
+        RetryPolicy(initial_interval=-1)
+
+
+def test_retry_policy_rejects_zero_backoff_factor():
+    """`RetryPolicy(backoff_factor=0)` must raise `ValueError`.
+
+    Zero backoff factor means "no growth" — silently behaves like
+    constant delay. Pre-fix, silently accepted.
+    """
+    with pytest.raises(ValueError, match=r"backoff_factor must be > 0"):
+        RetryPolicy(backoff_factor=0)
+
+
+def test_retry_policy_rejects_inverted_intervals():
+    """`RetryPolicy(initial_interval=1, max_interval=0.5)` must raise.
+
+    `max_interval < initial_interval` would silently clamp at runtime.
+    Pre-fix, the NamedTuple silently accepted.
+    """
+    with pytest.raises(
+        ValueError, match=r"max_interval .* must be >= initial_interval"
+    ):
+        RetryPolicy(initial_interval=1, max_interval=0.5)
+
+
+def test_retry_policy_rejects_zero_max_attempts():
+    """`RetryPolicy(max_attempts=0)` must raise `ValueError`.
+
+    Zero max attempts means "make zero attempts" — nonsensical.
+    Pre-fix, silently accepted.
+    """
+    with pytest.raises(ValueError, match=r"max_attempts must be >= 1"):
+        RetryPolicy(max_attempts=0)
+
+
+def test_retry_policy_defaults_construct_clean():
+    """`RetryPolicy()` with no args must NOT raise.
+
+    Happy-path regression: all defaults are valid.
+    """
+    policy = RetryPolicy()
+    assert policy.initial_interval == 0.5
+    assert policy.backoff_factor == 2.0
+    assert policy.max_interval == 128.0
+    assert policy.max_attempts == 3
