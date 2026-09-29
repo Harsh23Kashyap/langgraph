@@ -60,6 +60,7 @@ from langgraph.pregel._retry import (
 from langgraph.pregel.protocol import StreamProtocol
 from langgraph.runtime import DEFAULT_RUNTIME, ExecutionInfo, Runtime
 from langgraph.types import (
+    CachePolicy,
     Command,
     PregelExecutableTask,
     RetryPolicy,
@@ -2939,3 +2940,76 @@ async def test_pregel_user_raised_cancellederror_fails_run():
     with pytest.raises(NodeCancelledError) as excinfo:
         await graph.ainvoke({"vals": []})
     assert excinfo.value.node == "boom"
+
+
+def test_cache_policy_ttl_rejects_bool_true():
+    """`CachePolicy(ttl=True)` must raise `ValueError`.
+
+    Regression: pre-fix, `ttl=True` slipped through the `ttl < 1`
+    check because `bool` subclasses `int` in Python (`True == 1`).
+    A user passing `True` got a 1-second TTL silently — same shape
+    of bug as PR #39 (`TimeoutPolicy.coerce(True)` slipped through
+    `_coerce_timeout_seconds`), PR #40 (`get_state_history(limit=True)`),
+    and PR #41 (`_coerce_timeout_seconds` chokepoint).
+    """
+    with pytest.raises(
+        ValueError, match=r"`ttl` must be an integer or None, not a bool"
+    ):
+        CachePolicy(ttl=True)
+
+
+def test_cache_policy_ttl_rejects_bool_false():
+    """`CachePolicy(ttl=False)` must raise `ValueError`.
+
+    Sibling coverage. `False == 0`, so `False < 1` is `True` and the
+    existing `ttl < 1` check WOULD catch `False` post-fix (it raises
+    "ttl must be at least 1"); pre-fix, the new bool guard catches
+    `False` first with the clearer "not a bool" message.
+    """
+    with pytest.raises(
+        ValueError, match=r"`ttl` must be an integer or None, not a bool"
+    ):
+        CachePolicy(ttl=False)
+
+
+def test_cache_policy_ttl_rejects_zero():
+    """`CachePolicy(ttl=0)` must raise `ValueError`.
+
+    A zero-second TTL means the cache entry expires instantly — the
+    cache is effectively useless. Pre-fix, the dataclass auto-init
+    silently accepted `ttl=0`. The `__post_init__` validation rejects
+    it with the same message as negative integers.
+    """
+    with pytest.raises(ValueError, match=r"ttl must be at least 1"):
+        CachePolicy(ttl=0)
+
+
+def test_cache_policy_ttl_rejects_negative():
+    """`CachePolicy(ttl=-1)` must raise `ValueError`.
+
+    A negative TTL is nonsense. Pre-fix, the dataclass auto-init
+    silently accepted `ttl=-1`. The `__post_init__` validation
+    rejects it.
+    """
+    with pytest.raises(ValueError, match=r"ttl must be at least 1"):
+        CachePolicy(ttl=-1)
+
+
+def test_cache_policy_ttl_accepts_none():
+    """`CachePolicy(ttl=None)` must NOT raise.
+
+    Happy-path regression: `None` means "never expires" per the
+    `ttl: int | None = None` type annotation. Validation must not
+    change behavior for `None`.
+    """
+    policy = CachePolicy(ttl=None)
+    assert policy.ttl is None
+
+
+def test_cache_policy_ttl_accepts_positive():
+    """`CachePolicy(ttl=60)` must NOT raise.
+
+    Happy-path regression: positive integers are the expected input.
+    """
+    policy = CachePolicy(ttl=60)
+    assert policy.ttl == 60
