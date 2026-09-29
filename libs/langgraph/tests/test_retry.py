@@ -65,6 +65,7 @@ from langgraph.types import (
     RetryPolicy,
     Send,
     TimeoutPolicy,
+    _coerce_timeout_seconds,
     interrupt,
 )
 
@@ -2939,3 +2940,51 @@ async def test_pregel_user_raised_cancellederror_fails_run():
     with pytest.raises(NodeCancelledError) as excinfo:
         await graph.ainvoke({"vals": []})
     assert excinfo.value.node == "boom"
+
+
+def test_coerce_timeout_seconds_rejects_bool_true():
+    """`_coerce_timeout_seconds(True, ...)` must raise `ValueError`.
+
+    Regression: pre-fix, `True` slipped through the `seconds <= 0`
+    check because `bool` subclasses `int` in Python (`True == 1`,
+    so `float(True) == 1.0` and `1.0 <= 0` is `False`). The user
+    got a 1-second timeout with no diagnostic.
+    """
+    with pytest.raises(ValueError, match=r"must be a number, not a bool"):
+        _coerce_timeout_seconds(True, field="run_timeout")
+
+
+def test_coerce_timeout_seconds_rejects_bool_false():
+    """`_coerce_timeout_seconds(False, ...)` must raise `ValueError`.
+
+    Sibling coverage. `False == 0`, so `float(False) == 0.0` and the
+    existing `seconds <= 0` check WOULD catch `False` post-fix (it
+    raises "must be greater than 0"); pre-fix, the new bool guard
+    catches `False` first with the clearer "not a bool" message.
+    """
+    with pytest.raises(ValueError, match=r"must be a number, not a bool"):
+        _coerce_timeout_seconds(False, field="idle_timeout")
+
+
+def test_coerce_timeout_policy_rejects_bool_for_run_timeout():
+    """`coerce_timeout_policy(True)` must raise `ValueError`.
+
+    Public-API sibling coverage. Exercises the `coerce_timeout_policy`
+    wrapper that downstream code (e.g. `Pregel.add_node(..., timeout=True)`)
+    actually calls. The bool guard in `_coerce_timeout_seconds` fires
+    on the `run_timeout` field.
+    """
+    with pytest.raises(ValueError, match=r"run_timeout must be a number, not a bool"):
+        coerce_timeout_policy(True)
+
+
+def test_coerce_timeout_policy_rejects_bool_for_idle_timeout():
+    """`coerce_timeout_policy(TimeoutPolicy(idle_timeout=True))` must raise.
+
+    Public-API sibling coverage for the `idle_timeout` field. The
+    `coerce()` fast-path returns the existing policy as-is only if
+    its timeouts are already validated floats; `True` is not, so the
+    slow path runs and the bool guard fires on `idle_timeout`.
+    """
+    with pytest.raises(ValueError, match=r"idle_timeout must be a number, not a bool"):
+        coerce_timeout_policy(TimeoutPolicy(idle_timeout=True))

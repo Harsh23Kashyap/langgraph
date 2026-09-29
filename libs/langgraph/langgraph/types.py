@@ -442,6 +442,12 @@ def _coerce_timeout_seconds(
 ) -> float | None:
     if value is None:
         return None
+    if isinstance(value, bool):
+        # Reject booleans explicitly. `bool` is a subclass of `int`
+        # in Python (`True == 1`, `False == 0`), so a naive
+        # `seconds <= 0` check would let `True` slip through as a
+        # "1-second timeout" without any diagnostic.
+        raise ValueError(f"{field} must be a number, not a bool")
     seconds = value.total_seconds() if isinstance(value, timedelta) else float(value)
     if seconds <= 0:
         raise ValueError(f"{field} must be greater than 0")
