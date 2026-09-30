@@ -2939,3 +2939,103 @@ async def test_pregel_user_raised_cancellederror_fails_run():
     with pytest.raises(NodeCancelledError) as excinfo:
         await graph.ainvoke({"vals": []})
     assert excinfo.value.node == "boom"
+
+
+def test_timeout_policy_construction_rejects_bool_run_timeout():
+    """`TimeoutPolicy(run_timeout=True)` must raise `ValueError`.
+
+    Regression: pre-fix, the dataclass auto-init silently set
+    `run_timeout=True` without going through `_coerce_timeout_seconds`.
+    A user passing `True` got a 1-second run timeout with no
+    diagnostic — same shape of bug as PR #39, PR #40, PR #41, PR #42,
+    and PR #43.
+    """
+    with pytest.raises(ValueError, match=r"`run_timeout` must be a number, not a bool"):
+        TimeoutPolicy(run_timeout=True)
+
+
+def test_timeout_policy_construction_rejects_bool_idle_timeout():
+    """`TimeoutPolicy(idle_timeout=True)` must raise `ValueError`.
+
+    Sibling coverage for the `idle_timeout` field.
+    """
+    with pytest.raises(
+        ValueError, match=r"`idle_timeout` must be a number, not a bool"
+    ):
+        TimeoutPolicy(idle_timeout=True)
+
+
+def test_timeout_policy_construction_rejects_negative_run_timeout():
+    """`TimeoutPolicy(run_timeout=-1)` must raise `ValueError`.
+
+    Pre-fix, the dataclass auto-init silently set `run_timeout=-1`.
+    Post-fix, mirrors the validation in `_coerce_timeout_seconds` so
+    direct construction catches the same bad input.
+    """
+    with pytest.raises(ValueError, match=r"run_timeout must be greater than 0"):
+        TimeoutPolicy(run_timeout=-1)
+
+
+def test_timeout_policy_construction_rejects_zero_run_timeout():
+    """`TimeoutPolicy(run_timeout=0)` must raise `ValueError`.
+
+    A zero-second run timeout means the asyncio cancellation fires
+    immediately. Pre-fix, silently accepted. Post-fix, the `<= 0`
+    check catches it.
+    """
+    with pytest.raises(ValueError, match=r"run_timeout must be greater than 0"):
+        TimeoutPolicy(run_timeout=0)
+
+
+def test_timeout_policy_construction_rejects_negative_idle_timeout():
+    """`TimeoutPolicy(idle_timeout=-1)` must raise `ValueError`.
+
+    Same shape of bug as `run_timeout=-1`.
+    """
+    with pytest.raises(ValueError, match=r"idle_timeout must be greater than 0"):
+        TimeoutPolicy(idle_timeout=-1)
+
+
+def test_timeout_policy_construction_rejects_invalid_refresh_on():
+    """`TimeoutPolicy(refresh_on='never')` must raise `ValueError`.
+
+    Pre-fix, the dataclass auto-init accepted any string. Post-fix,
+    mirrors the validation in `coerce()`.
+    """
+    with pytest.raises(ValueError, match=r"refresh_on must be 'auto' or 'heartbeat'"):
+        TimeoutPolicy(refresh_on="never")
+
+
+def test_timeout_policy_construction_accepts_defaults():
+    """`TimeoutPolicy()` with no args must NOT raise.
+
+    Happy-path regression: defaults are valid (`run_timeout=None`,
+    `idle_timeout=None`, `refresh_on='auto'`).
+    """
+    policy = TimeoutPolicy()
+    assert policy.run_timeout is None
+    assert policy.idle_timeout is None
+    assert policy.refresh_on == "auto"
+
+
+def test_timeout_policy_construction_accepts_valid_inputs():
+    """`TimeoutPolicy(run_timeout=1, idle_timeout=2, refresh_on='heartbeat')` must NOT raise.
+
+    Happy-path regression: positive floats and explicit `refresh_on`
+    are the expected input.
+    """
+    policy = TimeoutPolicy(run_timeout=1, idle_timeout=2, refresh_on="heartbeat")
+    assert policy.run_timeout == 1
+    assert policy.idle_timeout == 2
+    assert policy.refresh_on == "heartbeat"
+
+
+def test_timeout_policy_construction_accepts_timedelta():
+    """`TimeoutPolicy(run_timeout=timedelta(seconds=5))` must NOT raise.
+
+    Happy-path regression: `timedelta` is a valid input alongside
+    `float`. The post_init validation converts to seconds via
+    `total_seconds()` before the `<= 0` check.
+    """
+    policy = TimeoutPolicy(run_timeout=timedelta(seconds=5))
+    assert policy.run_timeout == timedelta(seconds=5)
