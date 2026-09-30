@@ -480,6 +480,36 @@ class TimeoutPolicy:
     `"heartbeat"` refreshes only on explicit `runtime.heartbeat()` calls.
     """
 
+    def __post_init__(self) -> None:
+        # Mirror the validation in `coerce()` / `coerce_timeout_policy()`
+        # so direct `TimeoutPolicy(...)` construction catches the same
+        # bad inputs as the `coerce()` path. Without this, users who
+        # construct a `TimeoutPolicy` directly (rather than letting
+        # `coerce_timeout_policy` normalize a scalar) would bypass
+        # the positivity check and the bad value would flow through
+        # to the asyncio cancellation logic with undefined behavior.
+        if self.refresh_on not in ("auto", "heartbeat"):
+            raise ValueError("refresh_on must be 'auto' or 'heartbeat'")
+        for field_name in ("run_timeout", "idle_timeout"):
+            value = getattr(self, field_name)
+            if value is None:
+                continue
+            # Reject booleans explicitly. `bool` is a subclass of `int`
+            # (and `float`) in Python (`True == 1`, `False == 0`), so a
+            # naive `seconds <= 0` check would let `True` slip through
+            # as a "1-second timeout" without any diagnostic.
+            if isinstance(value, bool):
+                raise ValueError(
+                    f"`{field_name}` must be a number, not a bool"
+                )
+            seconds = (
+                value.total_seconds()
+                if isinstance(value, timedelta)
+                else float(value)
+            )
+            if seconds <= 0:
+                raise ValueError(f"{field_name} must be greater than 0")
+
     @classmethod
     def coerce(
         cls, value: float | timedelta | TimeoutPolicy | None
