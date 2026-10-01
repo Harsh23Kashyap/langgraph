@@ -602,6 +602,12 @@ class Interrupt:
         id: str = _DEFAULT_INTERRUPT_ID,
         **deprecated_kwargs: Unpack[DeprecatedKwargs],
     ) -> None:
+        # Reject non-string / empty `id` at construction. The id is used
+        # as a dict key for resume lookups (pregel/_loop.py:829) and to
+        # match against pending task ids, so an empty/None/bool id would
+        # silently fail every resume attempt with no diagnostic.
+        if not isinstance(id, str) or id == "":
+            raise ValueError("`id` must be a non-empty string")
         self.value = value
 
         if (

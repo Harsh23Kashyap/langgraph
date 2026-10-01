@@ -9666,3 +9666,80 @@ async def test_delta_channel_async_write_ordering() -> None:
 
     state = await graph.aget_state(config)
     assert len(state.values["messages"]) == 6  # 3 human + 3 AI
+
+
+def test_interrupt_constructor_rejects_empty_id():
+    """`Interrupt(value=..., id="")` must raise `ValueError`.
+
+    Regression: pre-fix, an empty-string `id` silently passed
+    validation. The `id` is used as a dict key for resume lookups
+    (pregel/_loop.py:829) and to match against pending task ids,
+    so an empty id would silently fail every resume attempt with
+    no diagnostic.
+    """
+    with pytest.raises(ValueError, match=r"`id` must be a non-empty string"):
+        Interrupt(value="foo", id="")
+
+
+def test_interrupt_constructor_rejects_none_id():
+    """`Interrupt(value=..., id=None)` must raise `ValueError`.
+
+    Pre-fix, `id=None` silently passed and the resulting Interrupt
+    would never match a resume lookup.
+    """
+    with pytest.raises(ValueError, match=r"`id` must be a non-empty string"):
+        Interrupt(value="foo", id=None)
+
+
+def test_interrupt_constructor_rejects_bool_id():
+    """`Interrupt(value=..., id=True)` must raise `ValueError`.
+
+    Pre-fix, `id=True` (bool) silently passed because the type
+    annotation `id: str` is not enforced at runtime. The downstream
+    resume lookup (`pending_interrupts[task_id] == resume_id`)
+    would silently never match.
+    """
+    with pytest.raises(ValueError, match=r"`id` must be a non-empty string"):
+        Interrupt(value="foo", id=True)
+
+
+def test_interrupt_constructor_rejects_int_id():
+    """`Interrupt(value=..., id=42)` must raise `ValueError`.
+
+    Sibling coverage for non-string types. The annotation is
+    `id: str` but Python doesn't enforce annotations at runtime.
+    """
+    with pytest.raises(ValueError, match=r"`id` must be a non-empty string"):
+        Interrupt(value="foo", id=42)
+
+
+def test_interrupt_constructor_accepts_default_id():
+    """`Interrupt(value=...)` with no `id` must NOT raise.
+
+    Happy-path regression: the default `_DEFAULT_INTERRUPT_ID` is
+    a valid non-empty placeholder string.
+    """
+    interrupt = Interrupt(value="foo")
+    assert interrupt.id == "placeholder-id"
+
+
+def test_interrupt_constructor_accepts_valid_string_id():
+    """`Interrupt(value=..., id="custom-id")` must NOT raise.
+
+    Happy-path regression: explicit non-empty string ids are the
+    expected input.
+    """
+    interrupt = Interrupt(value="foo", id="custom-id")
+    assert interrupt.id == "custom-id"
+
+
+def test_interrupt_from_ns_unaffected_by_validation():
+    """`Interrupt.from_ns(...)` must NOT raise because `ns` always produces a valid id.
+
+    The deprecated `from_ns` classmethod uses `xxh3_128_hexdigest`
+    which always returns a non-empty hex string. Validation must not
+    break the deprecated path.
+    """
+    interrupt = Interrupt.from_ns(value="foo", ns="some-ns")
+    assert interrupt.id  # non-empty
+    assert len(interrupt.id) > 0
