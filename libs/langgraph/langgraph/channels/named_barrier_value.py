@@ -5,7 +5,13 @@ from typing_extensions import Self
 
 from langgraph._internal._typing import MISSING
 from langgraph.channels.base import BaseChannel, Value
-from langgraph.errors import EmptyChannelError, InvalidUpdateError
+from langgraph.errors import (
+    EmptyChannelError,
+    ErrorCode,
+    InvalidUpdateError,
+    create_error_message,
+)
+from langgraph.types import Overwrite
 
 __all__ = ("NamedBarrierValue", "NamedBarrierValueAfterFinish")
 
@@ -56,6 +62,25 @@ class NamedBarrierValue(Generic[Value], BaseChannel[Value, Value, set[Value]]):
     def update(self, values: Sequence[Value]) -> bool:
         updated = False
         for value in values:
+            # Reject `Overwrite` early: `Overwrite` is only supported on
+            # `BinaryOperatorAggregate` channels (i.e. channels with an
+            # `Annotated[KeyType, Reducer]` reducer). Without this guard,
+            # `Overwrite` would fall through to the `not in self.names`
+            # check and produce a confusing "Value Overwrite(...) not
+            # in {names}" error.
+            if isinstance(value, Overwrite):
+                msg = create_error_message(
+                    message=(
+                        f"At key '{self.key}': Received `Overwrite` value but "
+                        f"`NamedBarrierValue` does not support `Overwrite`. "
+                        f"`Overwrite` is only supported on `BinaryOperatorAggregate` "
+                        f"channels (i.e. channels with an `Annotated[KeyType, Reducer]` "
+                        f"reducer). To bypass the reducer on a single value, declare "
+                        f"the channel with a reducer like `operator.add`."
+                    ),
+                    error_code=ErrorCode.INVALID_CONCURRENT_GRAPH_UPDATE,
+                )
+                raise InvalidUpdateError(msg)
             if value in self.names:
                 if value not in self.seen:
                     self.seen.add(value)
@@ -134,6 +159,25 @@ class NamedBarrierValueAfterFinish(
     def update(self, values: Sequence[Value]) -> bool:
         updated = False
         for value in values:
+            # Reject `Overwrite` early: `Overwrite` is only supported on
+            # `BinaryOperatorAggregate` channels (i.e. channels with an
+            # `Annotated[KeyType, Reducer]` reducer). Without this guard,
+            # `Overwrite` would fall through to the `not in self.names`
+            # check and produce a confusing "Value Overwrite(...) not
+            # in {names}" error.
+            if isinstance(value, Overwrite):
+                msg = create_error_message(
+                    message=(
+                        f"At key '{self.key}': Received `Overwrite` value but "
+                        f"`NamedBarrierValue` does not support `Overwrite`. "
+                        f"`Overwrite` is only supported on `BinaryOperatorAggregate` "
+                        f"channels (i.e. channels with an `Annotated[KeyType, Reducer]` "
+                        f"reducer). To bypass the reducer on a single value, declare "
+                        f"the channel with a reducer like `operator.add`."
+                    ),
+                    error_code=ErrorCode.INVALID_CONCURRENT_GRAPH_UPDATE,
+                )
+                raise InvalidUpdateError(msg)
             if value in self.names:
                 if value not in self.seen:
                     self.seen.add(value)

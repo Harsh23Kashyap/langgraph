@@ -11,9 +11,15 @@ from typing_extensions import NotRequired, TypedDict
 
 from langgraph._internal._constants import OVERWRITE
 from langgraph._internal._typing import MISSING
+from langgraph.channels.any_value import AnyValue
 from langgraph.channels.binop import BinaryOperatorAggregate, _get_overwrite
 from langgraph.channels.delta import DeltaChannel
-from langgraph.channels.last_value import LastValue
+from langgraph.channels.ephemeral_value import EphemeralValue
+from langgraph.channels.last_value import LastValue, LastValueAfterFinish
+from langgraph.channels.named_barrier_value import (
+    NamedBarrierValue,
+    NamedBarrierValueAfterFinish,
+)
 from langgraph.channels.topic import Topic
 from langgraph.channels.untracked_value import UntrackedValue
 from langgraph.errors import EmptyChannelError, InvalidUpdateError
@@ -796,3 +802,107 @@ def test_delta_channel_from_checkpoint_seed_none_is_distinct_from_sentinel() -> 
     ch = spec.from_checkpoint(None)
     ch.replay_writes([("t0", "x", "after")])
     assert ch.get() == "after"
+
+
+def test_last_value_rejects_overwrite_misuse() -> None:
+    """`LastValue.update([Overwrite(...)])` must raise `InvalidUpdateError`.
+
+    Regression: pre-fix, `Overwrite` was silently stored as the
+    channel value, producing a silent bug where `get()` returned
+    the `Overwrite` instance instead of the underlying value.
+    """
+    ch = LastValue(int)
+    with pytest.raises(
+        InvalidUpdateError, match=r"`LastValue` does not support `Overwrite`"
+    ):
+        ch.update([Overwrite(value=42)])
+    # Bug-repro: confirm the value is NOT stored as Overwrite.
+    assert ch.value is MISSING
+
+
+def test_last_value_after_finish_rejects_overwrite_misuse() -> None:
+    """`LastValueAfterFinish.update([Overwrite(...)])` must raise."""
+    ch = LastValueAfterFinish(int)
+    with pytest.raises(
+        InvalidUpdateError, match=r"`LastValueAfterFinish` does not support `Overwrite`"
+    ):
+        ch.update([Overwrite(value=42)])
+    assert ch.value is MISSING
+
+
+def test_any_value_rejects_overwrite_misuse() -> None:
+    """`AnyValue.update([Overwrite(...)])` must raise."""
+    ch = AnyValue(int)
+    with pytest.raises(
+        InvalidUpdateError, match=r"`AnyValue` does not support `Overwrite`"
+    ):
+        ch.update([Overwrite(value=42)])
+    assert ch.value is MISSING
+
+
+def test_ephemeral_value_rejects_overwrite_misuse() -> None:
+    """`EphemeralValue.update([Overwrite(...)])` must raise."""
+    ch = EphemeralValue(int)
+    with pytest.raises(
+        InvalidUpdateError, match=r"`EphemeralValue` does not support `Overwrite`"
+    ):
+        ch.update([Overwrite(value=42)])
+    assert ch.value is MISSING
+
+
+def test_untracked_value_rejects_overwrite_misuse() -> None:
+    """`UntrackedValue.update([Overwrite(...)])` must raise."""
+    ch = UntrackedValue(int)
+    with pytest.raises(
+        InvalidUpdateError, match=r"`UntrackedValue` does not support `Overwrite`"
+    ):
+        ch.update([Overwrite(value=42)])
+    assert ch.value is MISSING
+
+
+def test_topic_rejects_overwrite_misuse() -> None:
+    """`Topic.update([Overwrite(...)])` must raise."""
+    ch = Topic(int)
+    with pytest.raises(
+        InvalidUpdateError, match=r"`Topic` does not support `Overwrite`"
+    ):
+        ch.update([Overwrite(value=42)])
+    assert ch.values == []
+
+
+def test_named_barrier_value_rejects_overwrite_misuse() -> None:
+    """`NamedBarrierValue.update([Overwrite(...)])` must raise.
+
+    Regression: pre-fix, the error message was "Value Overwrite(...)
+    not in {names}" — technically correct but misleading. Post-fix,
+    the error message is explicit about `Overwrite` being unsupported.
+    """
+    ch = NamedBarrierValue(str, {"a", "b"})
+    with pytest.raises(
+        InvalidUpdateError, match=r"`NamedBarrierValue` does not support `Overwrite`"
+    ):
+        ch.update([Overwrite(value="x")])
+    assert ch.seen == set()
+
+
+def test_named_barrier_value_after_finish_rejects_overwrite_misuse() -> None:
+    """`NamedBarrierValueAfterFinish.update([Overwrite(...)])` must raise."""
+    ch = NamedBarrierValueAfterFinish(str, {"a", "b"})
+    with pytest.raises(
+        InvalidUpdateError,
+        match=r"`NamedBarrierValue` does not support `Overwrite`",
+    ):
+        ch.update([Overwrite(value="x")])
+    assert ch.seen == set()
+
+
+def test_binary_operator_aggregate_accepts_overwrite() -> None:
+    """`BinaryOperatorAggregate.update([Overwrite(...)])` must NOT raise.
+
+    Regression guard: `BinaryOperatorAggregate` is the ONE channel that
+    legitimately supports `Overwrite`. The new guard must not break
+    this use case.
+    """
+    ch = BinaryOperatorAggregate(int, operator.add)
+    ch.update([Overwrite(value=42)])
+    assert ch.get() == 42
