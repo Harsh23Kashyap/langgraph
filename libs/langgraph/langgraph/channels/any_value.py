@@ -7,7 +7,13 @@ from typing_extensions import Self
 
 from langgraph._internal._typing import MISSING
 from langgraph.channels.base import BaseChannel, Value
-from langgraph.errors import EmptyChannelError
+from langgraph.errors import (
+    EmptyChannelError,
+    ErrorCode,
+    InvalidUpdateError,
+    create_error_message,
+)
+from langgraph.types import Overwrite
 
 __all__ = ("AnyValue",)
 
@@ -56,6 +62,26 @@ class AnyValue(Generic[Value], BaseChannel[Value, Value, Value]):
             else:
                 self.value = MISSING
                 return True
+        # Reject `Overwrite` early: `Overwrite` is only supported on
+        # `BinaryOperatorAggregate` channels (i.e. channels with an
+        # `Annotated[KeyType, Reducer]` reducer). On an `AnyValue`
+        # channel the bare `Overwrite` instance would otherwise be
+        # stored as the channel value, producing a silent bug where
+        # `get()` returns an `Overwrite` instead of the underlying value.
+        for value in values:
+            if isinstance(value, Overwrite):
+                msg = create_error_message(
+                    message=(
+                        f"At key '{self.key}': Received `Overwrite` value but "
+                        f"`AnyValue` does not support `Overwrite`. "
+                        f"`Overwrite` is only supported on `BinaryOperatorAggregate` "
+                        f"channels (i.e. channels with an `Annotated[KeyType, Reducer]` "
+                        f"reducer). To bypass the reducer on a single value, declare "
+                        f"the channel with a reducer like `operator.add`."
+                    ),
+                    error_code=ErrorCode.INVALID_CONCURRENT_GRAPH_UPDATE,
+                )
+                raise InvalidUpdateError(msg)
 
         self.value = values[-1]
         return True

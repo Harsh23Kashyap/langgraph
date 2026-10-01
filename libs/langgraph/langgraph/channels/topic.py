@@ -7,7 +7,13 @@ from typing_extensions import Self
 
 from langgraph._internal._typing import MISSING
 from langgraph.channels.base import BaseChannel, Value
-from langgraph.errors import EmptyChannelError
+from langgraph.errors import (
+    EmptyChannelError,
+    ErrorCode,
+    InvalidUpdateError,
+    create_error_message,
+)
+from langgraph.types import Overwrite
 
 __all__ = ("Topic",)
 
@@ -75,6 +81,26 @@ class Topic(
         return empty
 
     def update(self, values: Sequence[Value | list[Value]]) -> bool:
+        # Reject `Overwrite` early: `Overwrite` is only supported on
+        # `BinaryOperatorAggregate` channels (i.e. channels with an
+        # `Annotated[KeyType, Reducer]` reducer). On a `Topic` channel
+        # the bare `Overwrite` instance would otherwise be appended to
+        # the values list, producing a silent bug where `get()` returns
+        # `[Overwrite(...), ...]` instead of the underlying values.
+        for value in values:
+            if isinstance(value, Overwrite):
+                msg = create_error_message(
+                    message=(
+                        f"At key '{self.key}': Received `Overwrite` value but "
+                        f"`Topic` does not support `Overwrite`. "
+                        f"`Overwrite` is only supported on `BinaryOperatorAggregate` "
+                        f"channels (i.e. channels with an `Annotated[KeyType, Reducer]` "
+                        f"reducer). To bypass the reducer on a single value, declare "
+                        f"the channel with a reducer like `operator.add`."
+                    ),
+                    error_code=ErrorCode.INVALID_CONCURRENT_GRAPH_UPDATE,
+                )
+                raise InvalidUpdateError(msg)
         updated = False
         if not self.accumulate:
             updated = bool(self.values)

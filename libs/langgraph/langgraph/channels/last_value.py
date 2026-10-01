@@ -13,6 +13,7 @@ from langgraph.errors import (
     InvalidUpdateError,
     create_error_message,
 )
+from langgraph.types import Overwrite
 
 __all__ = ("LastValue", "LastValueAfterFinish")
 
@@ -56,6 +57,26 @@ class LastValue(Generic[Value], BaseChannel[Value, Value, Value]):
     def update(self, values: Sequence[Value]) -> bool:
         if len(values) == 0:
             return False
+        # Reject `Overwrite` early: `Overwrite` is only supported on
+        # `BinaryOperatorAggregate` channels (i.e. channels with an
+        # `Annotated[KeyType, Reducer]` reducer). On a `LastValue`
+        # channel the bare `Overwrite` instance would otherwise be
+        # stored as the channel value, producing a silent bug where
+        # `get()` returns an `Overwrite` instead of the underlying value.
+        for value in values:
+            if isinstance(value, Overwrite):
+                msg = create_error_message(
+                    message=(
+                        f"At key '{self.key}': Received `Overwrite` value but "
+                        f"`LastValue` does not support `Overwrite`. "
+                        f"`Overwrite` is only supported on `BinaryOperatorAggregate` "
+                        f"channels (i.e. channels with an `Annotated[KeyType, Reducer]` "
+                        f"reducer). To bypass the reducer on a single value, declare "
+                        f"the channel with a reducer like `operator.add`."
+                    ),
+                    error_code=ErrorCode.INVALID_CONCURRENT_GRAPH_UPDATE,
+                )
+                raise InvalidUpdateError(msg)
         if len(values) != 1:
             msg = create_error_message(
                 message=f"At key '{self.key}': Can receive only one value per step. Use an Annotated key to handle multiple values.",
@@ -122,6 +143,26 @@ class LastValueAfterFinish(
     def update(self, values: Sequence[Value | Any]) -> bool:
         if len(values) == 0:
             return False
+        # Reject `Overwrite` early: `Overwrite` is only supported on
+        # `BinaryOperatorAggregate` channels (i.e. channels with an
+        # `Annotated[KeyType, Reducer]` reducer). On a `LastValueAfterFinish`
+        # channel the bare `Overwrite` instance would otherwise be
+        # stored as the channel value, producing a silent bug where
+        # `get()` returns an `Overwrite` instead of the underlying value.
+        for value in values:
+            if isinstance(value, Overwrite):
+                msg = create_error_message(
+                    message=(
+                        f"At key '{self.key}': Received `Overwrite` value but "
+                        f"`LastValueAfterFinish` does not support `Overwrite`. "
+                        f"`Overwrite` is only supported on `BinaryOperatorAggregate` "
+                        f"channels (i.e. channels with an `Annotated[KeyType, Reducer]` "
+                        f"reducer). To bypass the reducer on a single value, declare "
+                        f"the channel with a reducer like `operator.add`."
+                    ),
+                    error_code=ErrorCode.INVALID_CONCURRENT_GRAPH_UPDATE,
+                )
+                raise InvalidUpdateError(msg)
 
         self.finished = False
         self.value = values[-1]
