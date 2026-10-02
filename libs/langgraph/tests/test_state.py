@@ -12,6 +12,7 @@ from typing_extensions import NotRequired, Required, TypedDict
 
 from langgraph.channels.binop import BinaryOperatorAggregate
 from langgraph.channels.ephemeral_value import EphemeralValue
+from langgraph.graph import END, START
 from langgraph.graph.state import (
     StateGraph,
     _get_node_name,
@@ -371,3 +372,83 @@ def test_is_field_channel() -> None:
     # No channel cases
     assert _is_field_channel(int) is None
     assert _is_field_channel(Annotated[int, "just_metadata"]) is None
+
+
+def test_add_edge_single_start_eager_validation_unknown_source():
+    """`add_edge('unknown', END)` must raise `ValueError` at call time.
+
+    Regression: pre-fix, the single-start branch silently accepted
+    unknown start_key node names. The error only surfaced later at
+    `compile()` time from `validate_graph`, with the message "Found
+    edge starting at unknown node 'X'".
+    """
+
+    class S(TypedDict):
+        x: int
+
+    b = StateGraph(S)
+    b.add_node("a", lambda s: s)
+    with pytest.raises(ValueError, match=r"Need to add_node `unknown` first"):
+        b.add_edge("unknown", END)
+
+
+def test_add_edge_single_start_eager_validation_unknown_target():
+    """`add_edge('a', 'unknown')` must raise `ValueError` at call time.
+
+    Sibling coverage for the target-node validation.
+    """
+
+    class S(TypedDict):
+        x: int
+
+    b = StateGraph(S)
+    b.add_node("a", lambda s: s)
+    with pytest.raises(ValueError, match=r"Need to add_node `unknown` first"):
+        b.add_edge("a", "unknown")
+
+
+def test_add_edge_single_start_eager_validation_known_nodes_ok():
+    """`add_edge('a', END)` with a known source must NOT raise.
+
+    Happy-path regression: the eager check must not break the
+    normal known-node path.
+    """
+
+    class S(TypedDict):
+        x: int
+
+    b = StateGraph(S)
+    b.add_node("a", lambda s: s)
+    # Should not raise.
+    b.add_edge("a", END)
+    assert ("a", END) in b.edges
+
+
+def test_add_edge_single_start_eager_validation_end_target_ok():
+    """`add_edge('a', END)` with END as the target must NOT raise.
+
+    END is a valid target even though it's not in `self.nodes`.
+    """
+
+    class S(TypedDict):
+        x: int
+
+    b = StateGraph(S)
+    b.add_node("a", lambda s: s)
+    # Should not raise.
+    b.add_edge("a", END)
+
+
+def test_add_edge_single_start_eager_validation_start_source_ok():
+    """`add_edge(START, 'a')` with START as the source must NOT raise.
+
+    START is a valid source even though it's not in `self.nodes`.
+    """
+
+    class S(TypedDict):
+        x: int
+
+    b = StateGraph(S)
+    b.add_node("a", lambda s: s)
+    # Should not raise.
+    b.add_edge(START, "a")
