@@ -2560,6 +2560,14 @@ class Pregel(
         BaseCache | None,
         Durability,
     ]:
+        if isinstance(config["recursion_limit"], bool):
+            # Reject booleans explicitly. `bool` is a subclass of `int`
+            # in Python (`True == 1`), so a naive `< 1` check would let
+            # `True` slip through as a "1-step recursion limit" and
+            # produce a confusing `GraphRecursionError: Recursion limit
+            # of True reached` at runtime instead of a clear
+            # `ValueError` at the entry point.
+            raise ValueError("`recursion_limit` must be an integer, not a bool")
         if config["recursion_limit"] < 1:
             raise ValueError("recursion_limit must be at least 1")
         if output_keys is None:

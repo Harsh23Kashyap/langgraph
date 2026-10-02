@@ -9666,3 +9666,41 @@ async def test_delta_channel_async_write_ordering() -> None:
 
     state = await graph.aget_state(config)
     assert len(state.values["messages"]) == 6  # 3 human + 3 AI
+
+
+def test_recursion_limit_rejects_bool_true():
+    """`config={'recursion_limit': True}` must raise `ValueError`.
+
+    Regression: pre-fix, `True` slipped through the `recursion_limit < 1`
+    check because `bool` subclasses `int` in Python (`True == 1`,
+    so `1 < 1` is `False`). The user got a confusing
+    `GraphRecursionError: Recursion limit of True reached` at runtime
+    instead of a clear `ValueError` at the entry point.
+    """
+
+    class S(TypedDict):
+        x: int
+
+    g = StateGraph(S).add_node("a", lambda s: s).add_edge(START, "a").compile()
+    with pytest.raises(
+        ValueError, match=r"`recursion_limit` must be an integer, not a bool"
+    ):
+        g.invoke({"x": 1}, config={"recursion_limit": True})
+
+
+def test_recursion_limit_rejects_bool_false():
+    """`config={'recursion_limit': False}` must raise `ValueError`.
+
+    Sibling coverage. `False == 0` so the existing `< 1` check WOULD
+    catch it post-fix; pre-fix, the new bool guard catches `False`
+    first with the clearer "not a bool" message.
+    """
+
+    class S(TypedDict):
+        x: int
+
+    g = StateGraph(S).add_node("a", lambda s: s).add_edge(START, "a").compile()
+    with pytest.raises(
+        ValueError, match=r"`recursion_limit` must be an integer, not a bool"
+    ):
+        g.invoke({"x": 1}, config={"recursion_limit": False})
