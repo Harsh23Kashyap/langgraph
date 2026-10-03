@@ -371,3 +371,50 @@ def test_is_field_channel() -> None:
     # No channel cases
     assert _is_field_channel(int) is None
     assert _is_field_channel(Annotated[int, "just_metadata"]) is None
+
+
+def test_state_graph_add_node_empty_string_raises() -> None:
+    """StateGraph.add_node rejects empty-string `node` at construction time."""
+
+    class _S(TypedDict):
+        foo: str
+
+    builder: StateGraph = StateGraph(_S)
+    with pytest.raises(ValueError, match="Node name must be a non-empty string"):
+        builder.add_node("", lambda state: {"foo": "x"})
+
+
+def test_state_graph_add_node_empty_after_action_name_fallback_raises() -> None:
+    """StateGraph.add_node rejects empty-string fallback (defensive sanity)."""
+
+    class _S(TypedDict):
+        foo: str
+
+    class _NamelessAction:
+        """Action without __name__ that triggers the fallback chain."""
+
+    builder: StateGraph = StateGraph(_S)
+    with pytest.raises(ValueError, match="Node name must be a non-empty string"):
+        builder.add_node(node="", action=_NamelessAction())  # type: ignore[arg-type]
+
+
+def test_state_graph_add_node_accepts_named_node() -> None:
+    """StateGraph.add_node accepts a named-node string."""
+
+    class _S(TypedDict):
+        foo: str
+
+    builder: StateGraph = StateGraph(_S)
+    builder.add_node("node_1", lambda state: {"foo": "x"})
+    assert "node_1" in builder.nodes
+
+
+def test_state_graph_add_node_empty_after_string_action_raises() -> None:
+    """StateGraph.add_node rejects a string action with empty node override."""
+
+    class _S(TypedDict):
+        foo: str
+
+    builder: StateGraph = StateGraph(_S)
+    with pytest.raises(ValueError, match="Node name must be a non-empty string"):
+        builder.add_node("", "some_action_name")
