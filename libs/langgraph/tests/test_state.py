@@ -18,6 +18,7 @@ from langgraph.graph.state import (
     _is_field_channel,
     _warn_invalid_state_schema,
 )
+from langgraph.types import Send
 
 
 class State(BaseModel):
@@ -371,3 +372,30 @@ def test_is_field_channel() -> None:
     # No channel cases
     assert _is_field_channel(int) is None
     assert _is_field_channel(Annotated[int, "just_metadata"]) is None
+
+
+def test_send_empty_node_raises() -> None:
+    """Send rejects empty-string `node` at construction time."""
+    with pytest.raises(ValueError, match="`node` must be a non-empty string"):
+        Send("", {"foo": 1})
+
+
+def test_send_non_string_node_raises() -> None:
+    """Send rejects non-string `node` at construction time."""
+    with pytest.raises(ValueError, match="`node` must be a non-empty string"):
+        Send(node=None, arg={"foo": 1})  # type: ignore[arg-type]
+
+
+def test_send_accepts_named_node() -> None:
+    """Send accepts a named node string."""
+    s = Send("node_1", {"foo": 1})
+    assert s.node == "node_1"
+    assert s.arg == {"foo": 1}
+
+
+def test_send_accepts_named_node_with_timeout() -> None:
+    """Send accepts a named node with a numeric timeout (coerced)."""
+    s = Send("node_1", {"foo": 1}, timeout=5)
+    assert s.node == "node_1"
+    assert s.arg == {"foo": 1}
+    assert s.timeout is not None
