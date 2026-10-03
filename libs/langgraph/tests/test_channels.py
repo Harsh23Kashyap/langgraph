@@ -14,6 +14,10 @@ from langgraph._internal._typing import MISSING
 from langgraph.channels.binop import BinaryOperatorAggregate, _get_overwrite
 from langgraph.channels.delta import DeltaChannel
 from langgraph.channels.last_value import LastValue
+from langgraph.channels.named_barrier_value import (
+    NamedBarrierValue,
+    NamedBarrierValueAfterFinish,
+)
 from langgraph.channels.topic import Topic
 from langgraph.channels.untracked_value import UntrackedValue
 from langgraph.errors import EmptyChannelError, InvalidUpdateError
@@ -796,3 +800,44 @@ def test_delta_channel_from_checkpoint_seed_none_is_distinct_from_sentinel() -> 
     ch = spec.from_checkpoint(None)
     ch.replay_writes([("t0", "x", "after")])
     assert ch.get() == "after"
+
+
+def test_named_barrier_value_init_rejects_empty_names():
+    """`NamedBarrierValue(typ, set())` must raise `ValueError`.
+
+    Regression: pre-fix, an empty `names` set silently constructed a
+    permanently-broken channel. `ch.is_available()` returned True,
+    `ch.get()` returned None, and every `ch.update([...])` raised
+    `InvalidUpdateError("Value X not in set()")` with no diagnostic
+    about the empty configuration.
+    """
+    with pytest.raises(ValueError, match=r"`names` must be a non-empty set"):
+        NamedBarrierValue(str, set())
+
+
+def test_named_barrier_value_after_finish_init_rejects_empty_names():
+    """`NamedBarrierValueAfterFinish(typ, set())` must raise `ValueError`.
+
+    Sibling coverage for the AfterFinish class.
+    """
+    with pytest.raises(ValueError, match=r"`names` must be a non-empty set"):
+        NamedBarrierValueAfterFinish(str, set())
+
+
+def test_named_barrier_value_init_accepts_singleton():
+    """`NamedBarrierValue(typ, {"a"})` must NOT raise.
+
+    Happy-path regression: a singleton names set is the smallest
+    valid configuration.
+    """
+    ch = NamedBarrierValue(str, {"a"})
+    assert ch.names == {"a"}
+
+
+def test_named_barrier_value_after_finish_init_accepts_singleton():
+    """`NamedBarrierValueAfterFinish(typ, {"a"})` must NOT raise.
+
+    Sibling happy-path regression.
+    """
+    ch = NamedBarrierValueAfterFinish(str, {"a"})
+    assert ch.names == {"a"}
