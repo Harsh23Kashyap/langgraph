@@ -19,6 +19,8 @@ class NamedBarrierValue(Generic[Value], BaseChannel[Value, Value, set[Value]]):
     seen: set[Value]
 
     def __init__(self, typ: type[Value], names: set[Value]) -> None:
+        if not names:
+            raise ValueError("`names` must be a non-empty set")
         super().__init__(typ)
         self.names = names
         self.seen: set[str] = set()
@@ -92,6 +94,8 @@ class NamedBarrierValueAfterFinish(
     seen: set[Value]
 
     def __init__(self, typ: type[Value], names: set[Value]) -> None:
+        if not names:
+            raise ValueError("`names` must be a non-empty set")
         super().__init__(typ)
         self.names = names
         self.seen: set[str] = set()
