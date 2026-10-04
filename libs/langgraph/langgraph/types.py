@@ -823,6 +823,14 @@ class Command(Generic[N], ToolOutputMixin):
     resume: dict[str, Any] | Any | None = None
     goto: Send | Sequence[Send | N] | N = ()
 
+    def __post_init__(self) -> None:
+        if isinstance(self.goto, str) and not self.goto:
+            raise ValueError("`goto` must be a non-empty string")
+        if isinstance(self.goto, Sequence) and not isinstance(self.goto, str):
+            for item in self.goto:
+                if isinstance(item, str) and not item:
+                    raise ValueError("`goto` must not contain empty-string node names")
+
     def __repr__(self) -> str:
         # get all non-None values
         contents = ", ".join(
