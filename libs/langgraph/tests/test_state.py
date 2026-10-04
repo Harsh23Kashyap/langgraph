@@ -18,6 +18,7 @@ from langgraph.graph.state import (
     _is_field_channel,
     _warn_invalid_state_schema,
 )
+from langgraph.types import CachePolicy
 
 
 class State(BaseModel):
@@ -371,3 +372,35 @@ def test_is_field_channel() -> None:
     # No channel cases
     assert _is_field_channel(int) is None
     assert _is_field_channel(Annotated[int, "just_metadata"]) is None
+
+
+def test_cache_policy_non_callable_key_func_raises() -> None:
+    """CachePolicy rejects non-callable `key_func` at construction time."""
+    with pytest.raises(ValueError, match="`key_func` must be a callable or None"):
+        CachePolicy(key_func="not_callable")
+
+
+def test_cache_policy_int_key_func_raises() -> None:
+    """CachePolicy rejects int `key_func` at construction time (locks to type)."""
+    with pytest.raises(ValueError, match="`key_func` must be a callable or None"):
+        CachePolicy(key_func=42)
+
+
+def test_cache_policy_callable_key_func_accepted() -> None:
+    """CachePolicy accepts a real callable key_func."""
+    cp = CachePolicy(key_func=lambda x: x)
+    assert cp.key_func is not None
+    assert cp.ttl is None
+
+
+def test_cache_policy_none_key_func_accepted() -> None:
+    """CachePolicy accepts explicit `key_func=None` (triggers internal default)."""
+    cp = CachePolicy(key_func=None)
+    assert cp.key_func is None
+
+
+def test_cache_policy_default_key_func_accepted() -> None:
+    """CachePolicy accepts the dataclass default key_func."""
+    cp = CachePolicy()
+    assert cp.key_func is not None
+    assert cp.ttl is None
