@@ -73,6 +73,12 @@ class DeltaChannel(Generic[Value], BaseChannel[Any, Any, Any]):
         *,
         snapshot_frequency: int = 1000,
     ) -> None:
+        if isinstance(snapshot_frequency, bool) or not isinstance(
+            snapshot_frequency, int
+        ):
+            raise TypeError(
+                f"snapshot_frequency must be an int, not {type(snapshot_frequency).__name__}"
+            )
         if snapshot_frequency <= 0:
             raise ValueError(
                 f"snapshot_frequency must be a positive int, got {snapshot_frequency}"

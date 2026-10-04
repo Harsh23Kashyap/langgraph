@@ -796,3 +796,43 @@ def test_delta_channel_from_checkpoint_seed_none_is_distinct_from_sentinel() -> 
     ch = spec.from_checkpoint(None)
     ch.replay_writes([("t0", "x", "after")])
     assert ch.get() == "after"
+
+
+def test_delta_channel_snapshot_frequency_bool_true_raises() -> None:
+    """DeltaChannel rejects bool snapshot_frequency=True (True == 1 would silently pass)."""
+
+    def _reducer(curr, vals):
+        return curr + list(vals)
+
+    with pytest.raises(TypeError, match="snapshot_frequency must be an int, not bool"):
+        DeltaChannel(_reducer, list, snapshot_frequency=True)
+
+
+def test_delta_channel_snapshot_frequency_bool_false_raises() -> None:
+    """DeltaChannel rejects bool snapshot_frequency=False."""
+
+    def _reducer(curr, vals):
+        return curr + list(vals)
+
+    with pytest.raises(TypeError, match="snapshot_frequency must be an int, not bool"):
+        DeltaChannel(_reducer, list, snapshot_frequency=False)
+
+
+def test_delta_channel_snapshot_frequency_string_raises() -> None:
+    """DeltaChannel rejects str snapshot_frequency."""
+
+    def _reducer(curr, vals):
+        return curr + list(vals)
+
+    with pytest.raises(TypeError, match="snapshot_frequency must be an int, not str"):
+        DeltaChannel(_reducer, list, snapshot_frequency="1000")
+
+
+def test_delta_channel_snapshot_frequency_accepts_positive_int() -> None:
+    """DeltaChannel accepts a positive int snapshot_frequency (sanity check)."""
+
+    def _reducer(curr, vals):
+        return curr + list(vals)
+
+    ch = DeltaChannel(_reducer, list, snapshot_frequency=1000)
+    assert ch.snapshot_frequency == 1000
