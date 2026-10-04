@@ -18,6 +18,7 @@ from langgraph.graph.state import (
     _is_field_channel,
     _warn_invalid_state_schema,
 )
+from langgraph.types import Command
 
 
 class State(BaseModel):
@@ -371,3 +372,35 @@ def test_is_field_channel() -> None:
     # No channel cases
     assert _is_field_channel(int) is None
     assert _is_field_channel(Annotated[int, "just_metadata"]) is None
+
+
+def test_command_goto_empty_string_raises() -> None:
+    """Command rejects empty-string `goto` at construction time."""
+    with pytest.raises(ValueError, match="`goto` must be a non-empty string"):
+        Command(goto="")
+
+
+def test_command_goto_empty_string_in_sequence_raises() -> None:
+    """Command rejects empty-string node name in sequence goto."""
+    with pytest.raises(
+        ValueError, match="`goto` must not contain empty-string node names"
+    ):
+        Command(goto=("", "node_1"))
+
+
+def test_command_goto_accepts_single_named_string() -> None:
+    """Command accepts a valid named-string goto."""
+    cmd = Command(goto="node_1")
+    assert cmd.goto == "node_1"
+
+
+def test_command_goto_accepts_sequence_of_named_strings() -> None:
+    """Command accepts a valid sequence of named-string gotos."""
+    cmd = Command(goto=("node_1", "node_2"))
+    assert cmd.goto == ("node_1", "node_2")
+
+
+def test_command_goto_default_empty_tuple_is_fine() -> None:
+    """Command accepts the documented default (empty tuple = no goto)."""
+    cmd = Command()
+    assert cmd.goto == ()
