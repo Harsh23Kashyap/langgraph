@@ -528,6 +528,10 @@ class CachePolicy(Generic[KeyFuncT]):
     ttl: int | None = None
     """Time to live for the cache entry in seconds. If `None`, the entry never expires."""
 
+    def __post_init__(self) -> None:
+        if self.key_func is not None and not callable(self.key_func):
+            raise ValueError("`key_func` must be a callable or None")
+
 
 @dataclass(**_DC_KWARGS)
 class TracePolicy:
