@@ -1778,3 +1778,41 @@ class TestDrainOnConsume:
         log.close()
         assert [x async for x in a] == [0, 1, 2]
         assert [x async for x in b] == [0, 1, 2]
+
+    def test_tee_bool_true_raises(self) -> None:
+        """StreamChannel.tee rejects bool n=True (True == 1 would silently pass)."""
+        ch: StreamChannel[int] = StreamChannel()
+        ch._bind(is_async=False)
+        with pytest.raises(
+            TypeError, match="tee\\(\\) requires n to be an int, not bool"
+        ):
+            ch.tee(True)
+
+    def test_tee_string_raises(self) -> None:
+        """StreamChannel.tee rejects str n (locks to int type)."""
+        ch: StreamChannel[int] = StreamChannel()
+        ch._bind(is_async=False)
+        with pytest.raises(
+            TypeError, match="tee\\(\\) requires n to be an int, not str"
+        ):
+            ch.tee("2")  # type: ignore[arg-type]
+
+    @pytest.mark.anyio
+    async def test_atee_bool_true_raises(self) -> None:
+        """StreamChannel.atee rejects bool n=True."""
+        ch: StreamChannel[int] = StreamChannel()
+        ch._bind(is_async=True)
+        with pytest.raises(
+            TypeError, match="atee\\(\\) requires n to be an int, not bool"
+        ):
+            ch.atee(True)
+
+    @pytest.mark.anyio
+    async def test_atee_string_raises(self) -> None:
+        """StreamChannel.atee rejects str n."""
+        ch: StreamChannel[int] = StreamChannel()
+        ch._bind(is_async=True)
+        with pytest.raises(
+            TypeError, match="atee\\(\\) requires n to be an int, not str"
+        ):
+            ch.atee("2")  # type: ignore[arg-type]

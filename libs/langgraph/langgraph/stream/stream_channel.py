@@ -260,7 +260,10 @@ class StreamChannel(Generic[T]):
             TypeError: If the channel is unbound or bound to async mode.
             RuntimeError: If the channel already has a subscriber.
             ValueError: If `n` < 1.
+            TypeError: If `n` is not an int (bool is rejected).
         """
+        if isinstance(n, bool) or not isinstance(n, int):
+            raise TypeError(f"tee() requires n to be an int, not {type(n).__name__}")
         if n < 1:
             raise ValueError("tee() requires n >= 1")
         source = self.__iter__()
@@ -304,7 +307,10 @@ class StreamChannel(Generic[T]):
             TypeError: If the channel is unbound or bound to sync mode.
             RuntimeError: If the channel already has a subscriber.
             ValueError: If `n` < 1.
+            TypeError: If `n` is not an int (bool is rejected).
         """
+        if isinstance(n, bool) or not isinstance(n, int):
+            raise TypeError(f"atee() requires n to be an int, not {type(n).__name__}")
         if n < 1:
             raise ValueError("atee() requires n >= 1")
         source = self.__aiter__()
