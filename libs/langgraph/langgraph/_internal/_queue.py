@@ -96,6 +96,12 @@ class SyncQueue:
         available, else raise the Empty exception ('timeout' is ignored
         in that case).
         """
+        if timeout is not None and (
+            isinstance(timeout, bool) or not isinstance(timeout, (int, float))
+        ):
+            raise TypeError(
+                f"'timeout' must be a non-negative number, not {type(timeout).__name__}"
+            )
         if timeout is not None and timeout < 0:
             raise ValueError("'timeout' must be a non-negative number")
         if not self._count.acquire(block, timeout):
@@ -109,6 +115,12 @@ class SyncQueue:
         """If queue is empty, wait until an item maybe is available,
         but don't consume it.
         """
+        if timeout is not None and (
+            isinstance(timeout, bool) or not isinstance(timeout, (int, float))
+        ):
+            raise TypeError(
+                f"'timeout' must be a non-negative number, not {type(timeout).__name__}"
+            )
         if timeout is not None and timeout < 0:
             raise ValueError("'timeout' must be a non-negative number")
         self._count.wait(block, timeout)
