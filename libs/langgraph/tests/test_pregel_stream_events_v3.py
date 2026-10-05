@@ -1748,6 +1748,26 @@ class TestDrainOnConsume:
         with pytest.raises(ValueError, match="positive int or None"):
             StreamChannel(maxlen=-3)
 
+    def test_maxlen_bool_true_raises(self) -> None:
+        with pytest.raises(TypeError, match="maxlen must be an int or None, not bool"):
+            StreamChannel(maxlen=True)
+
+    def test_maxlen_bool_false_raises(self) -> None:
+        with pytest.raises(TypeError, match="maxlen must be an int or None, not bool"):
+            StreamChannel(maxlen=False)
+
+    def test_maxlen_string_raises(self) -> None:
+        with pytest.raises(TypeError, match="maxlen must be an int or None, not str"):
+            StreamChannel(maxlen="100")
+
+    def test_maxlen_accepts_positive_int(self) -> None:
+        ch = StreamChannel(maxlen=1000)
+        assert ch._maxlen == 1000
+
+    def test_maxlen_accepts_none(self) -> None:
+        ch = StreamChannel(maxlen=None)
+        assert ch._maxlen is None
+
     def test_push_unbounded_by_design(self) -> None:
         """Push is non-blocking; the caller-driven pump bounds memory via iteration pace."""
         log: StreamChannel[int] = StreamChannel()
