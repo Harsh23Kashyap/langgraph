@@ -67,6 +67,8 @@ class _TaskFunction(Generic[P, T]):
         name: str | None = None,
     ) -> None:
         if name is not None:
+            if not name:
+                raise ValueError("`name` must be a non-empty string")
             if hasattr(func, "__func__"):
                 # handle class methods
                 # NOTE: we're modifying the instance method to avoid modifying
