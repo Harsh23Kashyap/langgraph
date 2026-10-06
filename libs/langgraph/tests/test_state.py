@@ -12,6 +12,7 @@ from typing_extensions import NotRequired, Required, TypedDict
 
 from langgraph.channels.binop import BinaryOperatorAggregate
 from langgraph.channels.ephemeral_value import EphemeralValue
+from langgraph.func import task
 from langgraph.graph.state import (
     StateGraph,
     _get_node_name,
@@ -371,3 +372,32 @@ def test_is_field_channel() -> None:
     # No channel cases
     assert _is_field_channel(int) is None
     assert _is_field_channel(Annotated[int, "just_metadata"]) is None
+
+
+def test_task_decorator_empty_name_raises() -> None:
+    """@task(name="") must raise ValueError."""
+    with pytest.raises(ValueError, match=r"`name` must be a non-empty string"):
+
+        @task(name="")
+        def my_func():
+            return 1
+
+
+def test_task_decorator_valid_name_accepted() -> None:
+    """@task(name="my-name") constructs cleanly."""
+
+    @task(name="my-name")
+    def my_func():
+        return 1
+
+    assert my_func.func.__name__ == "my-name"
+
+
+def test_task_decorator_default_name_accepted() -> None:
+    """@task() with no name preserves the function's natural name."""
+
+    @task()
+    def my_func():
+        return 1
+
+    assert my_func.func.__name__ == "my_func"
