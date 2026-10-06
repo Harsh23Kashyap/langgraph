@@ -771,6 +771,10 @@ class Send:
             timeout: Optional timeout policy for this specific pushed task. A
                 number or `timedelta` is treated as a hard `run_timeout`.
         """
+        if not isinstance(node, str):
+            raise TypeError(f"`node` must be a string, got {type(node).__name__}")
+        if not node:
+            raise ValueError("`node` must be a non-empty string")
         self.node = node
         self.arg = arg
         self.timeout = TimeoutPolicy.coerce(timeout)
