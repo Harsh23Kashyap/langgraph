@@ -149,6 +149,11 @@ def delete_ui_message(id: str, *, state_key: str = "ui") -> RemoveUIMessage:
         ```
 
     """
+    if not isinstance(id, str):
+        raise TypeError(f"`id` must be a string, got {type(id).__name__}")
+    if not id:
+        raise ValueError("`id` must be a non-empty string")
+
     from langgraph._internal._constants import CONFIG_KEY_SEND
 
     writer = get_stream_writer()
