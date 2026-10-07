@@ -96,6 +96,9 @@ def push_ui_message(
         ```
 
     """
+    if id is not None and not isinstance(id, str):
+        raise TypeError(f"`id` must be a string or None, got {type(id).__name__}")
+
     from langgraph._internal._constants import CONFIG_KEY_SEND
 
     writer = get_stream_writer()
