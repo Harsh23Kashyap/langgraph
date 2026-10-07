@@ -33,6 +33,14 @@ class LangGraphDeprecationWarning(DeprecationWarning):
         since: tuple[int, int],
         expected_removal: tuple[int, int] | None = None,
     ) -> None:
+        if not isinstance(message, str):
+            raise TypeError(f"`message` must be a string, got {type(message).__name__}")
+        if not message:
+            raise ValueError("`message` must be a non-empty string")
+        if len(since) != 2:
+            raise ValueError(
+                f"`since` must be a 2-tuple of (major, minor), got length {len(since)}"
+            )
         super().__init__(message, *args)
         self.message = message.rstrip(".")
         self.since = since
