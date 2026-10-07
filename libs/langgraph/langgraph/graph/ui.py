@@ -96,6 +96,11 @@ def push_ui_message(
         ```
 
     """
+    if not isinstance(name, str):
+        raise TypeError(f"`name` must be a string, got {type(name).__name__}")
+    if not name:
+        raise ValueError("`name` must be a non-empty string")
+
     from langgraph._internal._constants import CONFIG_KEY_SEND
 
     writer = get_stream_writer()
