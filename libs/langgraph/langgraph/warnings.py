@@ -36,6 +36,10 @@ class LangGraphDeprecationWarning(DeprecationWarning):
         super().__init__(message, *args)
         self.message = message.rstrip(".")
         self.since = since
+        if expected_removal is not None and len(expected_removal) != 2:
+            raise ValueError(
+                f"`expected_removal` must be a 2-tuple of (major, minor), got length {len(expected_removal)}"
+            )
         self.expected_removal = (
             expected_removal if expected_removal is not None else (since[0] + 1, 0)
         )
