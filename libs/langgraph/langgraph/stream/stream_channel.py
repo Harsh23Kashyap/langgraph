@@ -63,7 +63,15 @@ class StreamChannel(Generic[T]):
 
         Raises:
             ValueError: If `maxlen` is not a positive integer or `None`.
+            ValueError: If `name` is set but is an empty string.
+            TypeError: If `name` is set but is not a string.
         """
+        if name is not None and not isinstance(name, str):
+            raise TypeError(
+                f"`name` must be a string or None, got {type(name).__name__}"
+            )
+        if name is not None and not name:
+            raise ValueError("`name` must be a non-empty string")
         if maxlen is not None and maxlen <= 0:
             raise ValueError("StreamChannel maxlen must be a positive int or None")
         self.name = name
