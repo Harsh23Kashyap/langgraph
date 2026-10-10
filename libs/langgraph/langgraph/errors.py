@@ -214,6 +214,10 @@ class NodeTimeoutError(Exception):
         idle_timeout: float | None = None,
         run_timeout: float | None = None,
     ) -> None:
+        if not isinstance(node, str):
+            raise TypeError(f"`node` must be a string, got {type(node).__name__}")
+        if not node:
+            raise ValueError("`node` must be a non-empty string")
         if kind == "idle":
             if idle_timeout is None:
                 raise ValueError("idle_timeout is required when kind='idle'")
