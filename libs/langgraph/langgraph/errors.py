@@ -183,6 +183,10 @@ class NodeCancelledError(Exception):
     node: str
 
     def __init__(self, node: str, message: str | None = None) -> None:
+        if not isinstance(node, str):
+            raise TypeError(f"`node` must be a string, got {type(node).__name__}")
+        if not node:
+            raise ValueError("`node` must be a non-empty string")
         super().__init__(message or f"Node {node!r} raised asyncio.CancelledError")
         self.node = node
 
