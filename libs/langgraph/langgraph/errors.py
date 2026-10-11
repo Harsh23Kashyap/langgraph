@@ -164,6 +164,16 @@ class NodeError:
     error: BaseException
     """Exception raised by the failed node."""
 
+    def __post_init__(self) -> None:
+        if not isinstance(self.node, str):
+            raise TypeError(f"`node` must be a string, got {type(self.node).__name__}")
+        if not self.node:
+            raise ValueError("`node` must be a non-empty string")
+        if not isinstance(self.error, BaseException):
+            raise TypeError(
+                f"`error` must be a BaseException, got {type(self.error).__name__}"
+            )
+
 
 class NodeCancelledError(Exception):
     """Raised when a node body raises ``asyncio.CancelledError`` itself.
